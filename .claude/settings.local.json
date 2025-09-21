@@ -76,7 +76,8 @@
       "Bash(bun pm ls:*)",
       "WebFetch(domain:solana.stackexchange.com)",
       "Bash(rg:*)",
-      "Bash(m t:*)"
+      "Bash(m t:*)",
+      "mcp__serena__read_memory"
     ],
     "deny": [],
     "ask": []
