@@ -116,7 +116,7 @@ public fun test_invalid_signature_fails() {
         let ctx = scenario.ctx();
 
         // Try to verify with invalid signature (all zeros)
-        let mut invalid_sig = vector::empty<u8>();
+        let mut invalid_sig = vector[];
         let mut i = 0;
         while (i < 48) {
             invalid_sig.push_back(0u8);

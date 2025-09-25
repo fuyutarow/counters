@@ -35,3 +35,10 @@ public fun increment(self: &mut SharedCounter) {
 public fun set_value(self: &mut SharedCounter, value: u64) {
     self.value = value;
 }
+
+// === View Functions ===
+
+/// Get the current counter value.
+public fun value(self: &SharedCounter): u64 {
+    self.value
+}

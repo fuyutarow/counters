@@ -4,8 +4,6 @@ module counter::ibs_counter;
 
 use sui::{bls12381, group_ops::Element};
 
-// === Imports ===
-
 // === Constants ===
 
 const EInvalidSignature: u64 = 1;
@@ -119,7 +117,7 @@ public fun verify_ibs(
     let sig_g1 = bls12381::g1_from_bytes(&sig_g1);
 
     // 2) Compute H(ID||DST||m)
-    let mut message = vector::empty<u8>();
+    let mut message = vector[];
     message.append(id);
     message.append(params.dst);
     message.append(msg);

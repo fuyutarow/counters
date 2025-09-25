@@ -35,3 +35,10 @@ public fun increment(self: &mut OwnedCounter) {
 public fun set_value(self: &mut OwnedCounter, value: u64) {
     self.value = value;
 }
+
+// === View Functions ===
+
+/// Get the current counter value.
+public fun value(self: &OwnedCounter): u64 {
+    self.value
+}
