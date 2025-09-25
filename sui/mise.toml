@@ -73,7 +73,7 @@ echo "📦 package.jsonを最新バージョンに更新中..."
 bunx npm-check-updates -u
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-bun install
+npm install
 echo "✅ 依存関係を最新バージョンに更新完了！"
 '''
 
@@ -325,13 +325,25 @@ echo "  2. mise run gen    # ABI定義の更新"
 echo "  3. mise run dev    # 開発サーバー再起動"
 '''
 
+[tasks."move:test"]
+description = "Moveコントラクトのテスト実行"
+alias = ["move-test", "mt"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+PACKAGE="${1:-counter}"
+echo "🧪 $PACKAGE のテスト実行中..."
+cd move/$PACKAGE && sui move test
+echo "✅ $PACKAGE テスト完了"
+'''
+
 [tasks."move:format"]
 description = "Moveコードフォーマットのみ"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🎨 Moveコードフォーマット中..."
-bun @mysten/prettier-plugin-move --use-module-label=true -w move/**/*.move
+bunx @mysten/prettier-plugin-move --use-module-label=true -w move/**/*.move
 echo "✅ Moveコードフォーマット完了"
 '''
 
@@ -353,4 +365,3 @@ echo "✅ Moveクリーン完了"
 description = "Sui ABI定義のみ生成"
 alias = ["gen-abi", "abigen"]
 run = "bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi"
-
