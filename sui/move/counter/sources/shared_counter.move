@@ -19,7 +19,7 @@ public struct SharedCounter has key {
 // === Public Functions ===
 
 /// Create and share a SharedCounter object.
-public fun create(ctx: &mut TxContext) {
+public fun share(ctx: &mut TxContext) {
     transfer::share_object(SharedCounter {
         id: object::new(ctx),
         value: 0,
@@ -27,11 +27,11 @@ public fun create(ctx: &mut TxContext) {
 }
 
 /// Increment a counter by 1.
-public fun increment(counter: &mut SharedCounter) {
-    counter.value = counter.value + 1;
+public fun increment(self: &mut SharedCounter) {
+    self.value = self.value + 1;
 }
 
 /// Set value (only runnable by the SharedCounter owner)
-public fun set_value(counter: &mut SharedCounter, value: u64) {
-    counter.value = value;
+public fun set_value(self: &mut SharedCounter, value: u64) {
+    self.value = value;
 }
