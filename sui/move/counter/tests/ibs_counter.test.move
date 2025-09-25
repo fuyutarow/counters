@@ -22,7 +22,7 @@ const TEST_SIG: vector<u8> =
 
 #[test_only]
 public fun setup_test_params(scenario: &mut Scenario): IBSParams {
-    let ctx = test_scenario::ctx(scenario);
+    let ctx = scenario.ctx();
     ibs_counter::new_params(
         TEST_MPK,
         TEST_DST,
@@ -36,7 +36,7 @@ public fun setup_test_params(scenario: &mut Scenario): IBSParams {
 #[test_only]
 public fun setup_test_counter(scenario: &mut Scenario): IBSCounter {
     let params = setup_test_params(scenario);
-    let ctx = test_scenario::ctx(scenario);
+    let ctx = scenario.ctx();
 
     ibs_counter::test_create_counter(params, ctx)
 }
@@ -45,56 +45,62 @@ public fun setup_test_counter(scenario: &mut Scenario): IBSCounter {
 
 #[test]
 public fun test_create_ibs_params() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let params = setup_test_params(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let params = setup_test_params(&mut scenario);
 
-    // Verify the parameters are set correctly - need to create counter to test
-    let counter = ibs_counter::test_create_counter(params, test_scenario::ctx(scenario));
-    let (t, n) = ibs_counter::threshold_params(&counter);
-    assert_eq!(t, 5);
-    assert_eq!(n, 10);
-    assert_eq!(ibs_counter::version(&counter), 1);
+        // Verify the parameters are set correctly - need to create counter to test
+        let counter = ibs_counter::test_create_counter(params, scenario.ctx());
+        let (t, n) = ibs_counter::threshold_params(&counter);
+        assert_eq!(t, 5);
+        assert_eq!(n, 10);
+        assert_eq!(ibs_counter::version(&counter), 1);
 
-    // Clean up counter
-    ibs_counter::test_destroy_counter(counter);
+        // Clean up counter
+        ibs_counter::test_destroy_counter(counter);
+    };
 
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 #[test]
 public fun test_share_ibs_counter() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let params = setup_test_params(scenario);
-    let ctx = test_scenario::ctx(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let params = setup_test_params(&mut scenario);
+        let ctx = scenario.ctx();
 
-    // Share the counter - this should not fail
-    ibs_counter::share(params, ctx);
+        // Share the counter - this should not fail
+        ibs_counter::share(params, ctx);
+    };
 
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 #[test]
 public fun test_counter_view_functions() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let counter = setup_test_counter(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let counter = setup_test_counter(&mut scenario);
 
-    // Test view functions
-    assert_eq!(ibs_counter::value(&counter), 0);
-    assert_eq!(ibs_counter::version(&counter), 1);
-    let (t, n) = ibs_counter::threshold_params(&counter);
-    assert_eq!(t, 5);
-    assert_eq!(n, 10);
+        // Test view functions
+        assert_eq!(ibs_counter::value(&counter), 0);
+        assert_eq!(ibs_counter::version(&counter), 1);
+        let (t, n) = ibs_counter::threshold_params(&counter);
+        assert_eq!(t, 5);
+        assert_eq!(n, 10);
 
-    // Clean up counter
-    ibs_counter::test_destroy_counter(counter);
+        // Clean up counter
+        ibs_counter::test_destroy_counter(counter);
+    };
 
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 // === Error Case Tests ===
@@ -102,34 +108,36 @@ public fun test_counter_view_functions() {
 #[test]
 #[expected_failure(abort_code = sui::group_ops::EInvalidInput)]
 public fun test_invalid_signature_fails() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let counter = setup_test_counter(scenario);
-    let ctx = test_scenario::ctx(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let counter = setup_test_counter(&mut scenario);
+        let ctx = scenario.ctx();
 
-    // Try to verify with invalid signature (all zeros)
-    let mut invalid_sig = vector::empty<u8>();
-    let mut i = 0;
-    while (i < 48) {
-        invalid_sig.push_back(0u8);
-        i = i + 1;
+        // Try to verify with invalid signature (all zeros)
+        let mut invalid_sig = vector::empty<u8>();
+        let mut i = 0;
+        while (i < 48) {
+            invalid_sig.push_back(0u8);
+            i = i + 1;
+        };
+
+        // This should fail with EInvalidSignature before creating proof
+        let _proof = ibs_counter::verify_and_mint_proof(
+            &counter,
+            invalid_sig,
+            TEST_ID,
+            TEST_MSG,
+            ctx,
+        );
+
+        // This code should never be reached due to expected failure
+        ibs_counter::test_destroy_proof(_proof);
+        ibs_counter::test_destroy_counter(counter);
     };
 
-    // This should fail with EInvalidSignature before creating proof
-    let _proof = ibs_counter::verify_and_mint_proof(
-        &counter,
-        invalid_sig,
-        TEST_ID,
-        TEST_MSG,
-        ctx,
-    );
-
-    // This code should never be reached due to expected failure
-    ibs_counter::test_destroy_proof(_proof);
-    ibs_counter::test_destroy_counter(counter);
-
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 #[test]
@@ -140,136 +148,147 @@ public fun test_invalid_signature_fails() {
     ),
 ]
 public fun test_wrong_counter_proof_fails() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    // Create two different counters
-    let mut counter1 = setup_test_counter(scenario);
-    let counter2 = setup_test_counter(scenario);
-    let ctx = test_scenario::ctx(scenario);
+    scenario.next_tx(@0x1);
+    {
+        // Create two different counters
+        let mut counter1 = setup_test_counter(&mut scenario);
+        let counter2 = setup_test_counter(&mut scenario);
+        let ctx = scenario.ctx();
 
-    // Create proof for counter2
-    let proof = ibs_counter::test_create_proof(&counter2, ctx);
+        // Create proof for counter2
+        let proof = ibs_counter::test_create_proof(&counter2, ctx);
 
-    // Try to use proof on counter1 - should fail
-    ibs_counter::increment(&mut counter1, proof);
+        // Try to use proof on counter1 - should fail
+        ibs_counter::increment(&mut counter1, proof);
 
-    // Clean up counters
-    ibs_counter::test_destroy_counter(counter1);
-    ibs_counter::test_destroy_counter(counter2);
+        // Clean up counters
+        ibs_counter::test_destroy_counter(counter1);
+        ibs_counter::test_destroy_counter(counter2);
+    };
 
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 // === Integration Tests ===
 
 #[test]
 public fun test_verify_ibs_with_known_values() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let params = setup_test_params(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let params = setup_test_params(&mut scenario);
 
-    // Test the core verification function with test vectors
-    // Note: In a real implementation, you'd use actual BLS12-381 test vectors
-    let result = ibs_counter::verify_ibs(
-        &params,
-        TEST_SIG,
-        TEST_ID,
-        TEST_MSG,
-    );
+        // Test the core verification function with test vectors
+        // Note: In a real implementation, you'd use actual BLS12-381 test vectors
+        let result = ibs_counter::verify_ibs(
+            &params,
+            TEST_SIG,
+            TEST_ID,
+            TEST_MSG,
+        );
 
-    // For testing purposes, we expect this to return false with our dummy data
-    // In production, you'd use real cryptographic test vectors
-    assert!(!result, 0);
+        // For testing purposes, we expect this to return false with our dummy data
+        // In production, you'd use real cryptographic test vectors
+        assert!(!result, 0);
 
-    // Clean up params
-    ibs_counter::test_destroy_params(params);
+        // Clean up params
+        ibs_counter::test_destroy_params(params);
+    };
 
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 #[test]
 public fun test_multiple_increments() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let mut counter = setup_test_counter(scenario);
-    let ctx = test_scenario::ctx(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let mut counter = setup_test_counter(&mut scenario);
+        let ctx = scenario.ctx();
 
-    // Create multiple proof tokens and increment
-    let initial_value = ibs_counter::value(&counter);
+        // Create multiple proof tokens and increment
+        let initial_value = ibs_counter::value(&counter);
 
-    // Create first proof
-    let proof1 = ibs_counter::test_create_proof(&counter, ctx);
+        // Create first proof
+        let proof1 = ibs_counter::test_create_proof(&counter, ctx);
 
-    ibs_counter::increment(&mut counter, proof1);
-    assert_eq!(ibs_counter::value(&counter), initial_value + 1);
+        ibs_counter::increment(&mut counter, proof1);
+        assert_eq!(ibs_counter::value(&counter), initial_value + 1);
 
-    // Create second proof
-    let proof2 = ibs_counter::test_create_proof(&counter, ctx);
+        // Create second proof
+        let proof2 = ibs_counter::test_create_proof(&counter, ctx);
 
-    ibs_counter::increment(&mut counter, proof2);
-    assert_eq!(ibs_counter::value(&counter), initial_value + 2);
+        ibs_counter::increment(&mut counter, proof2);
+        assert_eq!(ibs_counter::value(&counter), initial_value + 2);
 
-    // Clean up counter
-    ibs_counter::test_destroy_counter(counter);
+        // Clean up counter
+        ibs_counter::test_destroy_counter(counter);
+    };
 
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 // === Performance and Edge Case Tests ===
 
 #[test]
 public fun test_large_counter_value() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
+    let mut scenario = test_scenario::begin(@0x1);
 
-    let mut counter = setup_test_counter(scenario);
-    let ctx = test_scenario::ctx(scenario);
+    scenario.next_tx(@0x1);
+    {
+        let mut counter = setup_test_counter(&mut scenario);
+        let ctx = scenario.ctx();
 
-    // Increment counter many times to test large values
-    let target_value = 1000u64;
-    let mut i = 0;
+        // Increment counter many times to test large values
+        let target_value = 1000u64;
+        let mut i = 0;
 
-    while (i < target_value) {
-        let proof = ibs_counter::test_create_proof(&counter, ctx);
-        ibs_counter::increment(&mut counter, proof);
-        i = i + 1;
+        while (i < target_value) {
+            let proof = ibs_counter::test_create_proof(&counter, ctx);
+            ibs_counter::increment(&mut counter, proof);
+            i = i + 1;
+        };
+
+        assert_eq!(ibs_counter::value(&counter), target_value);
+
+        // Clean up counter
+        ibs_counter::test_destroy_counter(counter);
     };
 
-    assert_eq!(ibs_counter::value(&counter), target_value);
-
-    // Clean up counter
-    ibs_counter::test_destroy_counter(counter);
-
-    test_scenario::end(scenario_val);
+    scenario.end();
 }
 
 #[test]
 public fun test_different_dst_values() {
-    let mut scenario_val = test_scenario::begin(@0x1);
-    let scenario = &mut scenario_val;
-    let ctx = test_scenario::ctx(scenario);
+    let mut scenario = test_scenario::begin(@0x1);
 
-    // Create params with different DST
-    let dst1 = b"DST-VERSION-1";
-    let dst2 = b"DST-VERSION-2";
+    scenario.next_tx(@0x1);
+    {
+        let ctx = scenario.ctx();
 
-    let params1 = ibs_counter::new_params(TEST_MPK, dst1, 5, 10, 1, ctx);
-    let params2 = ibs_counter::new_params(TEST_MPK, dst2, 5, 10, 1, ctx);
+        // Create params with different DST
+        let dst1 = b"DST-VERSION-1";
+        let dst2 = b"DST-VERSION-2";
 
-    // Verify that different DSTs produce different results
-    let result1 = ibs_counter::verify_ibs(&params1, TEST_SIG, TEST_ID, TEST_MSG);
-    let result2 = ibs_counter::verify_ibs(&params2, TEST_SIG, TEST_ID, TEST_MSG);
+        let params1 = ibs_counter::new_params(TEST_MPK, dst1, 5, 10, 1, ctx);
+        let params2 = ibs_counter::new_params(TEST_MPK, dst2, 5, 10, 1, ctx);
 
-    // With same signature but different DST, results should be the same (both false in this test case)
-    // In real cryptographic scenarios, different DSTs would affect the hash computation
-    assert_eq!(result1, result2); // Both should be false with test data
+        // Verify that different DSTs produce different results
+        let result1 = ibs_counter::verify_ibs(&params1, TEST_SIG, TEST_ID, TEST_MSG);
+        let result2 = ibs_counter::verify_ibs(&params2, TEST_SIG, TEST_ID, TEST_MSG);
 
-    // Clean up params
-    ibs_counter::test_destroy_params(params1);
-    ibs_counter::test_destroy_params(params2);
+        // With same signature but different DST, results should be the same (both false in this test case)
+        // In real cryptographic scenarios, different DSTs would affect the hash computation
+        assert_eq!(result1, result2); // Both should be false with test data
 
-    test_scenario::end(scenario_val);
+        // Clean up params
+        ibs_counter::test_destroy_params(params1);
+        ibs_counter::test_destroy_params(params2);
+    };
+
+    scenario.end();
 }
