@@ -39,15 +39,15 @@ public struct IBSProof has key {
 // === Public Functions ===
 
 /// Create and initialize IBS parameters
-public fun init_ibs_params(
-    mpk_uncompressed: vector<u8>,
+public fun new_params(
+    mpk: vector<u8>,
     dst: vector<u8>,
     t: u64,
     n: u64,
     version: u64,
     ctx: &mut TxContext,
 ): IBSParams {
-    let mpk = bls12381::g2_from_bytes(&mpk_uncompressed);
+    let mpk = bls12381::g2_from_bytes(&mpk);
     IBSParams {
         id: sui::object::new(ctx),
         mpk,
@@ -71,9 +71,8 @@ public fun share(params: IBSParams, ctx: &mut TxContext) {
 /// Verify IBS signature and mint proof token
 public fun verify_and_mint_proof(
     self: &IBSCounter,
-    sig_g1_bytes: vector<u8>,
-    mpk_uncompressed: vector<u8>,
-    id_bytes: vector<u8>,
+    sig_g1: vector<u8>,
+    id: vector<u8>,
     msg: vector<u8>,
     ctx: &mut TxContext,
 ): IBSProof {
@@ -81,9 +80,8 @@ public fun verify_and_mint_proof(
     assert!(
         verify_ibs(
             &self.params,
-            sig_g1_bytes,
-            mpk_uncompressed,
-            id_bytes,
+            sig_g1,
+            id,
             msg,
         ),
         EInvalidSignature,
@@ -113,17 +111,16 @@ public fun increment(self: &mut IBSCounter, proof: IBSProof) {
 /// Core IBS signature verification function
 public fun verify_ibs(
     params: &IBSParams,
-    sig_g1_bytes: vector<u8>,
-    _mpk_uncompressed: vector<u8>, // Unused, kept for compatibility
-    id_bytes: vector<u8>,
+    sig_g1: vector<u8>,
+    id: vector<u8>,
     msg: vector<u8>,
 ): bool {
     // 1) Restore G1 signature (use stored mpk directly)
-    let sig_g1 = bls12381::g1_from_bytes(&sig_g1_bytes);
+    let sig_g1 = bls12381::g1_from_bytes(&sig_g1);
 
     // 2) Compute H(ID||DST||m)
     let mut message = vector::empty<u8>();
-    message.append(id_bytes);
+    message.append(id);
     message.append(params.dst);
     message.append(msg);
     let h_g1 = bls12381::hash_to_g1(&message);
@@ -151,4 +148,47 @@ public fun version(self: &IBSCounter): u64 {
 /// Get threshold parameters
 public fun threshold_params(self: &IBSCounter): (u64, u64) {
     (self.params.t, self.params.n)
+}
+
+// === Test Helper Functions ===
+
+#[test_only]
+/// Create a counter for testing purposes
+public fun test_create_counter(params: IBSParams, ctx: &mut TxContext): IBSCounter {
+    IBSCounter {
+        id: sui::object::new(ctx),
+        value: 0,
+        params,
+    }
+}
+
+#[test_only]
+/// Create a proof token for testing purposes
+public fun test_create_proof(counter: &IBSCounter, ctx: &mut TxContext): IBSProof {
+    IBSProof {
+        id: sui::object::new(ctx),
+        counter_id: sui::object::id(counter),
+    }
+}
+
+#[test_only]
+/// Destroy params for testing (to handle drop constraint)
+public fun test_destroy_params(params: IBSParams) {
+    let IBSParams { id, mpk: _, dst: _, t: _, n: _, version: _ } = params;
+    sui::object::delete(id);
+}
+
+#[test_only]
+/// Destroy counter for testing (to handle drop constraint)
+public fun test_destroy_counter(counter: IBSCounter) {
+    let IBSCounter { id, value: _, params } = counter;
+    sui::object::delete(id);
+    test_destroy_params(params);
+}
+
+#[test_only]
+/// Destroy proof for testing (to handle drop constraint)
+public fun test_destroy_proof(proof: IBSProof) {
+    let IBSProof { id, counter_id: _ } = proof;
+    sui::object::delete(id);
 }
