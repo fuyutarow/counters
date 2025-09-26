@@ -37,10 +37,10 @@
 //
 module counter::tibs_counter;
 
-use sui::bls12381;
+use sui::{bls12381::{Self, G2}, group_ops::Element};
 
 // === Constants ===
-const DOMAIN_SEPARATOR: vector<u8> = b"SUI-TIBS-COUNTER-V1";
+const DST_DERIVE_KEY: vector<u8> = b"SUI-TIBS-COUNTER-V1";
 
 // === Errors ===
 #[error]
@@ -64,14 +64,14 @@ const EConfigMismatch: vector<u8> = b"Configuration does not match counter";
 /// Each signer is identified by an address and holds a BLS public key
 public struct SignerInfo has copy, drop, store {
     signer_id: address,
-    public_key_bytes: vector<u8>, // G2 element serialized
+    public_key: Element<G2>, // G2 element parsed and ready to use
 }
 
 /// Configuration for threshold IBS verification
 /// Defines the authorized signers and required threshold
 public struct TIBSConfig has key, store {
     id: UID,
-    namespace: address, // Application-specific namespace for domain separation
+    package_id: address, // Application package identifier
     signers: vector<SignerInfo>,
     required_signatures: u64,
 }
@@ -104,7 +104,7 @@ public struct SignatureBundle has drop {
 /// Create and share TIBS configuration
 /// Sets up the authorized signers and threshold requirement
 public fun share_config(
-    namespace: address,
+    package_id: address,
     signer_ids: vector<address>,
     public_keys: vector<vector<u8>>,
     required_signatures: u64,
@@ -118,21 +118,21 @@ public fun share_config(
     // Verify no duplicates
     verify_no_duplicate_addresses(&signer_ids);
 
-    // Validate each public key can be parsed as G2
+    // Parse and validate each public key as G2
     let mut signers = vector[];
     let mut i = 0;
     while (i < total_signers) {
-        let _ = bls12381::g2_from_bytes(&public_keys[i]); // Validate format
+        let public_key = bls12381::g2_from_bytes(&public_keys[i]);
         signers.push_back(SignerInfo {
             signer_id: signer_ids[i],
-            public_key_bytes: public_keys[i],
+            public_key,
         });
         i = i + 1;
     };
 
     let config = TIBSConfig {
         id: object::new(ctx),
-        namespace,
+        package_id,
         signers,
         required_signatures,
     };
@@ -157,7 +157,7 @@ public fun verify_and_mint_proof(
     counter: &TIBSCounter,
     config: &TIBSConfig,
     signatures: vector<SignatureBundle>,
-    inner_id: vector<u8>,
+    id: vector<u8>, // [PackageId][InnerId]
     message: vector<u8>,
     ctx: &mut TxContext,
 ): TIBSProof {
@@ -177,14 +177,13 @@ public fun verify_and_mint_proof(
 
         if (signer_opt.is_some()) {
             let signer = signer_opt.extract();
-            // Verify IBS signature
+            // Verify signature
             if (
-                verify_ibs_signature(
+                verify_signature(
                     &sig.signature_bytes,
-                    config.namespace,
-                    &inner_id,
+                    &id,
                     &message,
-                    &signer.public_key_bytes,
+                    &signer.public_key,
                 )
             ) {
                 valid_count = valid_count + 1;
@@ -215,38 +214,37 @@ public fun increment(counter: &mut TIBSCounter, proof: TIBSProof) {
 
 // === Private Functions ===
 
-/// Core IBS signature verification
+/// Prepare message with domain separation
+fun prepare_message(message: &vector<u8>): vector<u8> {
+    let mut prepared = vector[];
+    prepared.append(DST_DERIVE_KEY);
+    prepared.append(*message);
+    prepared
+}
+
+/// Core signature verification
 /// Implements pairing-based verification: e(σ, G2_gen) = e(H(combined), mpk)
-fun verify_ibs_signature(
+fun verify_signature(
     signature_bytes: &vector<u8>,
-    namespace: address,
-    inner_id: &vector<u8>,
+    id: &vector<u8>, // [PackageId][InnerId]
     message: &vector<u8>,
-    public_key_bytes: &vector<u8>,
+    public_key_g2: &Element<G2>,
 ): bool {
-    // Parse cryptographic elements
+    // Parse signature element
     let signature_g1 = bls12381::g1_from_bytes(signature_bytes);
-    let public_key_g2 = bls12381::g2_from_bytes(public_key_bytes);
 
-    // Create full ID (namespace + inner_id)
-    let mut full_id = vector[];
-    full_id.append(namespace.to_bytes());
-    full_id.append(*inner_id);
-
-    // Create full message with domain separation
-    let mut full_message = vector[];
-    full_message.append(DOMAIN_SEPARATOR);
-    full_message.append(*message);
+    // Prepare message with domain separation
+    let prepared_message = prepare_message(message);
 
     // Combined hash for IBS (ID || message)
     let mut combined = vector[];
-    combined.append(full_id);
-    combined.append(full_message);
+    combined.append(*id);
+    combined.append(prepared_message);
     let h_combined = bls12381::hash_to_g1(&combined);
 
     // Verify pairing equation
     let lhs = bls12381::pairing(&signature_g1, &bls12381::g2_generator());
-    let rhs = bls12381::pairing(&h_combined, &public_key_g2);
+    let rhs = bls12381::pairing(&h_combined, public_key_g2);
 
     lhs == rhs
 }
