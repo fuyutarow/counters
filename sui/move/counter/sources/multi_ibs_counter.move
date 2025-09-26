@@ -27,6 +27,7 @@ module counter::multi_ibs_counter;
 
 use seal::key_server::KeyServer;
 use sui::{
+    bcs,
     bls12381::{G2, g1_from_bytes, g2_add, g2_identity, g2_generator, hash_to_g1, pairing},
     group_ops::Element
 };
@@ -55,6 +56,9 @@ const ECounterMismatch: vector<u8> = b"Counter ID mismatch";
 
 #[error]
 const EKeyServerAlreadyIncluded: vector<u8> = b"Key server already included in aggregation";
+
+#[error]
+const EInvalidID: vector<u8> = b"Invalid ID: does not match expected counter_id || signer_address format";
 
 // === Structs ===
 
@@ -148,6 +152,7 @@ public fun verify_and_create_proof(
     }
 }
 
+
 /// Increment counter using proof token
 public fun increment(counter: &mut MultiIBSCounter, proof: MultiIBSProof) {
     let MultiIBSProof { id, counter_id, verified_signer_count: _ } = proof;
@@ -237,6 +242,7 @@ fun verify_bls_signature(
     signature_pairing == message_pairing
 }
 
+
 // === View Functions ===
 
 public fun value(self: &MultiIBSCounter): u64 {
@@ -298,6 +304,24 @@ public fun test_destroy_proof(proof: MultiIBSProof) {
         verified_signer_count: _,
     } = proof;
     object::delete(id);
+}
+
+// === Seal Integration Functions ===
+
+/// Seal approve function for Multi-IBS counter access
+/// InnerID structure: counter_id || signer_address
+entry fun seal_approve_multi_ibs(
+    id: vector<u8>,
+    counter: &MultiIBSCounter,
+    _ctx: &TxContext
+) {
+    // Construct expected InnerID: counter_id || signer_address
+    let mut expected_inner_id = object::id(counter).to_bytes();
+    let signer_bytes = bcs::to_bytes(&_ctx.sender());
+    expected_inner_id.append(signer_bytes);
+
+    // Verify the provided ID matches expected InnerID
+    assert!(id == expected_inner_id, EInvalidID);
 }
 
 // === Test Helper Functions ===

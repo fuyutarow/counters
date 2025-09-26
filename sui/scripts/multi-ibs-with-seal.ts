@@ -50,7 +50,7 @@ const blss = bls12_381.shortSignatures;
 
 // Configuration
 const NETWORK = "testnet";
-const PACKAGE_ID = counterPackage.$address;
+const COUNTER_PACKAGE_ID = counterPackage.packageId;
 /**
  * THRESHOLD SIGNATURE CONFIGURATION
  *
@@ -126,94 +126,162 @@ class SealMultiIBSAggregator {
     this.sealClient = new SealClient({
       networkConfig: NETWORK, // testnet
       suiClient: this.suiClient,
+      serverConfigs: [
+        {
+          objectId: "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2",
+          url: "https://seal.studio-mirai.com", // Studio Mirai
+          weight: 1,
+        },
+        {
+          objectId: "0x6068c0acb197dddbacd4746a9de7f025b2ed5a5b6c1b1ab44dade4426d141da2",
+          url: "https://seal.ruby-node.com", // Ruby Node
+          weight: 1,
+        },
+        {
+          objectId: "0x5466b7df5c15b508678d51496ada8afab0d6f70a01c10613123382b1b8131007",
+          url: "https://seal.nodeinfra.com", // NodeInfra
+          weight: 1,
+        },
+      ],
     });
   }
 
   /**
    * Retrieve sk_ID_i from Seal Key Servers
+   * @param counterId Multi-IBS counter object ID
+   * @param signerKeypair Ed25519 keypair for signing
+   * @param requiredCount Number of key shares needed
    */
   async fetchSecretKeyShares(
-    identity: string,
+    counterId: string,
     signerKeypair: Ed25519Keypair,
     requiredCount: number = THRESHOLD,
   ): Promise<KeyShare[]> {
     /**
-     * REAL SEAL SDK INTEGRATION
+     * REAL SEAL SDK INTEGRATION - CORRECT LIFECYCLE
      *
-     * Production implementation using Seal Key Servers:
-     * 1. Create session key for authorized requests
-     * 2. Build approval transaction for identity-based key request
-     * 3. Fetch keys from multiple Key Servers
-     * 4. Extract G1Element secret keys for BLS aggregation
+     * Seal flow (following dpp-pilot pattern):
+     * 1. Construct InnerID: counter_id || signer_address
+     * 2. Create SessionKey FIRST (before seal_approve)
+     * 3. Build seal_approve PTB (don't execute, just build for txBytes)
+     * 4. Fetch IBE keys from Key Servers using SessionKey and txBytes
      */
 
     try {
-      // Step 1: Create session key for authorization
-      const sessionKey = SessionKey.create();
+      // Step 1: Construct InnerID = counter_id || signer_address
+      const signerAddress = signerKeypair.getPublicKey().toSuiAddress();
 
-      // Step 2: Build approval transaction
-      const message = new TextEncoder().encode(`Multi-IBS request for identity: ${identity}`);
-      const identityBytes = new TextEncoder().encode(identity);
+      // Convert counter ID to bytes (same as Move object::id().to_bytes())
+      // Move's object::id().to_bytes() returns raw 32-byte array from hex string
+      const counterIdBytes = Array.from(
+        Buffer.from(counterId.replace('0x', ''), 'hex')
+      );
 
-      // Step 3: Fetch keys from Seal servers
-      const keyResults = await this.sealClient.fetchKeys({
-        sessionKey,
-        signerKeypair,
-        identity: identityBytes,
-        message,
-        keyServerIds: KEY_SERVERS.slice(0, requiredCount).map((ks) => ks.objectId),
+      // Convert signer address to bytes (same as Move bcs::to_bytes(&address))
+      const signerBytes = Array.from(
+        Buffer.from(signerAddress.replace('0x', ''), 'hex')
+      );
+
+      // Concatenate: counter_id || signer_address (matching Move implementation)
+      const innerIdBytes = [...counterIdBytes, ...signerBytes];
+
+      // Convert to hex string for fetchKeys ids parameter
+      const innerIdHex = `0x${Buffer.from(innerIdBytes).toString('hex')}`;
+
+      // Step 2: Create SessionKey FIRST (following dpp-pilot pattern)
+      const sessionKey = await SessionKey.create({
+        address: signerAddress,
+        packageId: COUNTER_PACKAGE_ID,
+        ttlMin: 10,
+        signer: signerKeypair,
+        suiClient: this.suiClient,
       });
 
-      // Step 4: Convert to KeyShare format
-      const keyShares: KeyShare[] = keyResults.map((result, index) => ({
-        serverIndex: index,
-        serverId: KEY_SERVERS[index].objectId,
-        secretKey: new Uint8Array(result.secretKey), // sk_ID_i as G1Element bytes
-      }));
+      // Step 3: Build and execute seal_approve transaction
+      const approveTx = new Transaction();
+      approveTx.moveCall({
+        target: `${COUNTER_PACKAGE_ID}::multi_ibs_counter::seal_approve_multi_ibs`,
+        arguments: [
+          approveTx.pure.vector("u8", innerIdBytes),
+          approveTx.object(counterId),
+        ],
+      });
+
+      // Execute the seal_approve transaction first
+      const approveResult = await this.suiClient.signAndExecuteTransaction({
+        signer: signerKeypair,
+        transaction: approveTx,
+        options: {
+          showEffects: true,
+          requestType: "WaitForLocalExecution"
+        },
+      });
+
+      // Verify transaction success
+      if (approveResult.effects?.status?.status !== "success") {
+        throw new Error(`seal_approve failed: ${approveResult.effects?.status?.error}`);
+      }
+
+      // Small delay to ensure transaction is indexed
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Build the same transaction for txBytes (required by fetchKeys)
+      const txBytes = await approveTx.build({
+        client: this.suiClient,
+        onlyTransactionKind: true
+      });
+
+      // Step 4: Get IBE derived keys from Key Servers using getDerivedKeys
+      // getDerivedKeys returns Map<string, G1Element> where key is server objectId
+      const derivedKeys = await this.sealClient.getDerivedKeys({
+        id: innerIdHex,  // Use hex-encoded InnerID
+        sessionKey,
+        txBytes,
+        threshold: requiredCount,
+      });
+
+      console.log("getDerivedKeys result:", derivedKeys);
+      console.log("getDerivedKeys type:", typeof derivedKeys);
+
+      // Check if derivedKeys is a Map
+      if (!derivedKeys || typeof derivedKeys.size !== 'number') {
+        throw new Error(`getDerivedKeys returned unexpected result: ${derivedKeys}`);
+      }
+
+      // Step 5: Convert Map to KeyShare format
+      const keyShares: KeyShare[] = [];
+      let serverIndex = 0;
+
+      for (const [serverId, derivedKey] of derivedKeys) {
+        keyShares.push({
+          serverIndex,
+          serverId,
+          secretKey: derivedKey.key.toBytes(), // BonehFranklinBLS12381DerivedKey.key.toBytes() -> Uint8Array (48 bytes)
+        });
+        serverIndex++;
+      }
 
       return keyShares;
-    } catch (_error) {
-      // Fallback to mock keys for demonstration
-      return this.generateMockKeyShares(identity, requiredCount);
+    } catch (error) {
+      console.error("Seal Key Server fetch failed:", error);
+
+      // Provide more specific error context
+      if (error.message?.includes("notExists")) {
+        console.error("Object reference error - possible SessionKey or transaction object issue");
+      } else if (error.message?.includes("NoAccess")) {
+        console.error("Key Server access denied - seal_approve transaction may not have been properly executed or recognized");
+      }
+
+      throw new Error(`Real Key Server integration failed: ${error}. Mock fallback is forbidden.`);
     }
   }
 
   /**
-   * Generate mock key shares for development/testing
-   *
-   * IMPORTANT: Mock keys simulate the same mathematical properties as real keys:
-   * - Deterministic generation based on identity + server index
-   * - Different keys for different servers (simulates independent msk_i)
-   * - Consistent results for same identity (enables reproducible testing)
-   * - Valid 32-byte format (compatible with BLS scalar operations)
-   *
-   * Mock vs Real difference:
-   * - Mock: Simple hash-based derivation (fast, reproducible)
-   * - Real: Proper IBE key derivation with hash-to-G1 (secure, from Key Servers)
-   *
-   * Security note: Mock keys are NOT secure for production!
-   * They're only for development and testing purposes.
+   * REMOVED: No mock implementations allowed.
+   * Real Key Server integration only.
    */
-  private generateMockKeyShares(identity: string, count: number): KeyShare[] {
-    const shares: KeyShare[] = [];
-
-    for (let i = 0; i < count; i++) {
-      // Create deterministic mock key based on identity + server
-      const seed = new TextEncoder().encode(`${identity}:${i}:${KEY_SERVERS[i].name}`);
-      const secretKey = new Uint8Array(32);
-
-      for (let j = 0; j < 32; j++) {
-        secretKey[j] = seed[j % seed.length] ^ ((i * 17 + j * 31) & 0xff);
-      }
-
-      shares.push({
-        serverIndex: i,
-        serverId: KEY_SERVERS[i].objectId,
-        secretKey,
-      });
-    }
-
-    return shares;
+  private generateMockKeyShares(_identity: string, _count: number): KeyShare[] {
+    throw new Error("Mock key shares are forbidden. Use real Key Server integration only.");
   }
 
   /**
@@ -297,7 +365,7 @@ class SealMultiIBSAggregator {
 
     // Call verify_and_create_proof with aggregated signature
     const proof = tx.moveCall({
-      target: `${PACKAGE_ID}::multi_ibs_counter::verify_and_create_proof`,
+      target: `${COUNTER_PACKAGE_ID}::multi_ibs_counter::verify_and_create_proof`,
       arguments: [
         tx.object(counterId),
         tx.pure.vector("u8", Array.from(multiSig.signature)),
@@ -307,7 +375,7 @@ class SealMultiIBSAggregator {
 
     // Use proof to increment counter
     tx.moveCall({
-      target: `${PACKAGE_ID}::multi_ibs_counter::increment`,
+      target: `${COUNTER_PACKAGE_ID}::multi_ibs_counter::increment`,
       arguments: [tx.object(counterId), proof],
     });
 

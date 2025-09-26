@@ -94,7 +94,9 @@
       "Bash(sui keytool:*)",
       "Bash(m f)",
       "Bash(sui:*)",
-      "Bash(DEBUG=true bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi)"
+      "Bash(DEBUG=true bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi)",
+      "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/move/patterns/sources/**)",
+      "Bash(DEBUG=true bun --inspect scripts/suigenv0.ts -c suigen-config.json -o src/abi -n testnet)"
     ],
     "deny": [],
     "ask": []

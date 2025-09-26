@@ -4,9 +4,7 @@ version = "0.0.1"
 edition = "2024.beta"
 
 [dependencies]
-# seal = { published-at = "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50" }
 seal = { local = "../../../MYSTENLABS/seal/move/seal" }
-# seal = { local = "../../../MYSTENLABS/seal/move/seal", addr_subst = { seal = "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50" } }
 
 [addresses]
 counter = "0x0"

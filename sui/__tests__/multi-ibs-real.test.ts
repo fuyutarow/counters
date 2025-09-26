@@ -82,324 +82,338 @@ interface AggregatedSignature {
   // Move contract only needs signature_g1 and message for verification
 }
 
-// BLS Multi-IBS implementation
-class MultiBLSAggregator {
-  private suiClient: SuiClient;
-  private adminKeypair: Ed25519Keypair;
+// Pure functions - no classes
 
-  constructor() {
-    this.suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
+/**
+ * Fetch real secret key shares from Seal Key Servers
+ */
+const fetchRealSecretKeyShares = async (
+  client: SuiClient,
+  counterId: string,
+  keypair: Ed25519Keypair,
+  threshold: number,
+): Promise<SecretKeyShare[]> => {
+  // Import Seal SDK for real Key Server integration
+  const { SealMultiIBSAggregator } = await import("../scripts/multi-ibs-with-seal.ts");
+  const sealAggregator = new SealMultiIBSAggregator();
 
-    // Use funded keypair from Sui CLI keystore (secure approach)
-    const primeKeyInfo = getKeypair("PRIME"); // PRIME has ~20 SUI for testing
-    this.adminKeypair = primeKeyInfo.keypair;
+  // Fetch real Key Server shares using counter ID
+  const keyShares = await sealAggregator.fetchSecretKeyShares(
+    counterId,
+    keypair,
+    threshold,
+  );
+
+  return keyShares;
+};
+
+/**
+ * IMPORTANT: Aggregate secret keys using modular addition
+ *
+ * Mathematical foundation:
+ * - sk_ID = sk_ID_1 + sk_ID_2 + ... + sk_ID_n (mod Fr.ORDER)
+ * - Fr.ORDER is the order of the BLS12-381 scalar field (finite field)
+ * - This ensures the aggregated key remains valid in the cryptographic group
+ *
+ * Why modular arithmetic is crucial:
+ * - Prevents integer overflow beyond field size
+ * - Maintains cryptographic security properties
+ * - Compatible with BLS signature scheme requirements
+ * - Enables threshold signature verification
+ *
+ * DO NOT confuse with:
+ * - Point addition (that's for G1/G2 curve points, not scalars)
+ * - Simple integer addition (would overflow and break security)
+ * - XOR operations (completely different cryptographic primitive)
+ *
+ * This is the core of Multi-IBS: multiple keys → single aggregated key
+ */
+const aggregateSecretKeys = (shares: SecretKeyShare[]): Uint8Array => {
+  if (shares.length === 0) {
+    throw new Error("No secret key shares to aggregate");
   }
 
+  // Convert first key to bigint for modular arithmetic
+  let aggregated = bytesToBigInt(shares[0].secretKey);
+
+  // Add remaining keys in the scalar field (mod Fr.ORDER)
+  for (let i = 1; i < shares.length; i++) {
+    const keyBigInt = bytesToBigInt(shares[i].secretKey);
+    aggregated = (aggregated + keyBigInt) % bls12_381.fields.Fr.ORDER; // CRITICAL: mod curve order
+  }
+
+  return bigIntToBytes(aggregated, 32);
+};
+
+/**
+ * Create BLS signature using aggregated secret key
+ */
+const signMessage = (aggregatedSecretKey: Uint8Array, message: string): Uint8Array => {
+  const messageBytes = new TextEncoder().encode(message);
+
   /**
-   * Generate mock secret key shares for testing
-   * In production, these would come from Seal Key Servers
+   * CRITICAL: Domain separation must match Move contract exactly
+   *
+   * Domain separation prevents signature reuse across different contexts:
+   * - Move contract uses: DOMAIN_SEPARATOR_BLS = b"SUI-MULTI-IBS-V1"
+   * - We prepend this to message before hashing
+   * - DST (Domain Separation Tag) is standard BLS12-381 hash-to-curve
+   *
+   * Security requirement:
+   * - Different domains → different signatures (even for same message)
+   * - Prevents cross-protocol signature reuse attacks
+   * - Must match Move contract's domain for verification to succeed
    */
-  generateMockSecretKeyShares(identity: string, count: number): SecretKeyShare[] {
-    const shares: SecretKeyShare[] = [];
+  const messageWithDomain = new Uint8Array([
+    ...new TextEncoder().encode("SUI-MULTI-IBS-V1"), // MUST match Move contract
+    ...messageBytes,
+  ]);
+  const DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_"; // Standard BLS hash-to-curve
+  const hashedMessage = blss.hash(messageWithDomain, DST);
 
-    // Generate deterministic but different secret keys for each server
-    for (let i = 0; i < count; i++) {
-      // Create deterministic seed from identity + server index
-      const seed = new TextEncoder().encode(`${identity}:${i}:${KEY_SERVERS[i].name}`);
-      const hash = new Uint8Array(32);
+  // Create signature using aggregated secret key
+  const signature = blss.sign(hashedMessage, aggregatedSecretKey);
 
-      // Simple hash-based key derivation (for testing only)
-      for (let j = 0; j < 32; j++) {
-        hash[j] = seed[j % seed.length] ^ ((i * 17 + j * 31) & 0xff);
-      }
+  /**
+   * IMPORTANT: Convert Point to bytes for storage/transmission
+   *
+   * BLS library returns signature as G1 Point object, but we need:
+   * - 48 bytes for on-chain storage (Move contract expects vector<u8>)
+   * - Standardized compressed point representation
+   * - Compatible with Move contract's g1_from_bytes() function
+   */
+  return signature.toBytes(); // 48 bytes G1 compressed point
+};
 
-      shares.push({
-        keyServerIndex: i,
-        secretKey: hash,
-        keyServerId: KEY_SERVERS[i].objectId,
-      });
+/**
+ * Verify aggregated signature
+ */
+const verifyAggregatedSignature = (
+  signature: Uint8Array,
+  message: string,
+  aggregatedPublicKey: Uint8Array,
+): boolean => {
+  const messageBytes = new TextEncoder().encode(message);
+  // Use same domain separation as Move contract
+  const messageWithDomain = new Uint8Array([
+    ...new TextEncoder().encode("SUI-MULTI-IBS-V1"),
+    ...messageBytes,
+  ]);
+  const DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
+  const hashedMessage = blss.hash(messageWithDomain, DST);
+
+  // Convert bytes back to Point objects for verification
+  const sigPoint = bls12_381.G1.Point.fromBytes(signature);
+  const pubKeyPoint = bls12_381.G2.Point.fromBytes(aggregatedPublicKey);
+
+  return blss.verify(sigPoint, hashedMessage, pubKeyPoint);
+};
+
+/**
+ * Get public key from secret key
+ */
+const getPublicKey = (secretKey: Uint8Array): Uint8Array => {
+  return blss.getPublicKey(secretKey).toBytes();
+};
+
+/**
+ * Create Multi-IBS counter on testnet
+ */
+const createMultiIBSCounter = async (
+  client: SuiClient,
+  keypair: Ed25519Keypair,
+): Promise<string> => {
+  const tx = new Transaction();
+
+  const keyServerIds = KEY_SERVERS.map((server) => server.objectId);
+  const _counter = counterPackage.multi_ibs_counter.share(tx, {
+    arguments: [tx.pure.vector("id", keyServerIds), tx.pure.u64(THRESHOLD)],
+  });
+
+  const result = await client.signAndExecuteTransaction({
+    signer: keypair,
+    transaction: tx,
+    options: { showEffects: true, showObjectChanges: true },
+  });
+
+  const created = result.objectChanges?.find(
+    (change) => change.type === "created" && change.objectType?.includes("MultiIBSCounter"),
+  );
+
+  if (!created || created.type !== "created") {
+    throw new Error("Failed to create Multi-IBS counter");
+  }
+
+  return created.objectId;
+};
+
+/**
+ * Submit aggregated signature for verification and increment
+ *
+ * CHALLENGE: Real testnet execution requires actual Key Server objects
+ * Current approach: Skip complex AggregatedPublicKey setup for now
+ *
+ * For full implementation, would need:
+ * 1. Create AggregatedPublicKey with new_aggregated_public_key()
+ * 2. Add Key Server public keys with add_key_server_public_key()
+ * 3. Call verify_and_create_proof with proper aggregated key
+ * 4. Use returned proof to increment counter
+ */
+const submitAggregatedSignature = async (
+  client: SuiClient,
+  keypair: Ed25519Keypair,
+  counterId: string,
+  keyServerIds: string[],
+  signature: Uint8Array,
+  message: Uint8Array,
+): Promise<string> => {
+  const tx = new Transaction();
+
+  // Step 1: Create AggregatedPublicKey
+  const [aggregatedKey] = counterPackage.multi_ibs_counter.new_aggregated_public_key(tx, {
+    arguments: [tx.object(counterId)],
+  });
+
+  // Step 2: Add Key Server public keys (real Key Server objects)
+  for (const keyServerId of keyServerIds) {
+    if (!keyServerId) {
+      throw new Error(`Invalid key server ID: ${keyServerId}`);
     }
-
-    return shares;
-  }
-
-  /**
-   * IMPORTANT: Aggregate secret keys using modular addition
-   *
-   * Mathematical foundation:
-   * - sk_ID = sk_ID_1 + sk_ID_2 + ... + sk_ID_n (mod Fr.ORDER)
-   * - Fr.ORDER is the order of the BLS12-381 scalar field (finite field)
-   * - This ensures the aggregated key remains valid in the cryptographic group
-   *
-   * Why modular arithmetic is crucial:
-   * - Prevents integer overflow beyond field size
-   * - Maintains cryptographic security properties
-   * - Compatible with BLS signature scheme requirements
-   * - Enables threshold signature verification
-   *
-   * DO NOT confuse with:
-   * - Point addition (that's for G1/G2 curve points, not scalars)
-   * - Simple integer addition (would overflow and break security)
-   * - XOR operations (completely different cryptographic primitive)
-   *
-   * This is the core of Multi-IBS: multiple keys → single aggregated key
-   */
-  aggregateSecretKeys(shares: SecretKeyShare[]): Uint8Array {
-    if (shares.length === 0) {
-      throw new Error("No secret key shares to aggregate");
-    }
-
-    // Convert first key to bigint for modular arithmetic
-    let aggregated = this.bytesToBigInt(shares[0].secretKey);
-
-    // Add remaining keys in the scalar field (mod Fr.ORDER)
-    for (let i = 1; i < shares.length; i++) {
-      const keyBigInt = this.bytesToBigInt(shares[i].secretKey);
-      aggregated = (aggregated + keyBigInt) % bls12_381.fields.Fr.ORDER; // CRITICAL: mod curve order
-    }
-
-    return this.bigIntToBytes(aggregated, 32);
-  }
-
-  /**
-   * Create BLS signature using aggregated secret key
-   */
-  signMessage(aggregatedSecretKey: Uint8Array, message: string): Uint8Array {
-    const messageBytes = new TextEncoder().encode(message);
-
-    /**
-     * CRITICAL: Domain separation must match Move contract exactly
-     *
-     * Domain separation prevents signature reuse across different contexts:
-     * - Move contract uses: DOMAIN_SEPARATOR_BLS = b"SUI-MULTI-IBS-V1"
-     * - We prepend this to message before hashing
-     * - DST (Domain Separation Tag) is standard BLS12-381 hash-to-curve
-     *
-     * Security requirement:
-     * - Different domains → different signatures (even for same message)
-     * - Prevents cross-protocol signature reuse attacks
-     * - Must match Move contract's domain for verification to succeed
-     */
-    const messageWithDomain = new Uint8Array([
-      ...new TextEncoder().encode("SUI-MULTI-IBS-V1"), // MUST match Move contract
-      ...messageBytes,
-    ]);
-    const DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_"; // Standard BLS hash-to-curve
-    const hashedMessage = blss.hash(messageWithDomain, DST);
-
-    // Create signature using aggregated secret key
-    const signature = blss.sign(hashedMessage, aggregatedSecretKey);
-
-    /**
-     * IMPORTANT: Convert Point to bytes for storage/transmission
-     *
-     * BLS library returns signature as G1 Point object, but we need:
-     * - 48 bytes for on-chain storage (Move contract expects vector<u8>)
-     * - Standardized compressed point representation
-     * - Compatible with Move contract's g1_from_bytes() function
-     */
-    return signature.toBytes(); // 48 bytes G1 compressed point
-  }
-
-  /**
-   * Verify aggregated signature
-   */
-  verifyAggregatedSignature(
-    signature: Uint8Array,
-    message: string,
-    aggregatedPublicKey: Uint8Array,
-  ): boolean {
-    const messageBytes = new TextEncoder().encode(message);
-    // Use same domain separation as Move contract
-    const messageWithDomain = new Uint8Array([
-      ...new TextEncoder().encode("SUI-MULTI-IBS-V1"),
-      ...messageBytes,
-    ]);
-    const DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
-    const hashedMessage = blss.hash(messageWithDomain, DST);
-
-    // Convert bytes back to Point objects for verification
-    const sigPoint = bls12_381.G1.Point.fromBytes(signature);
-    const pubKeyPoint = bls12_381.G2.Point.fromBytes(aggregatedPublicKey);
-
-    return blss.verify(sigPoint, hashedMessage, pubKeyPoint);
-  }
-
-  /**
-   * Get public key from secret key
-   */
-  getPublicKey(secretKey: Uint8Array): Uint8Array {
-    return blss.getPublicKey(secretKey).toBytes();
-  }
-
-  /**
-   * Create Multi-IBS counter on testnet
-   */
-  async createMultiIBSCounter(): Promise<string> {
-    const tx = new Transaction();
-
-    const keyServerIds = KEY_SERVERS.map((server) => server.objectId);
-    const _counter = counterPackage.multi_ibs_counter.share(tx, {
-      arguments: [tx.pure.vector("address", keyServerIds), tx.pure.u64(THRESHOLD)],
+    counterPackage.multi_ibs_counter.add_key_server_public_key(tx, {
+      arguments: [tx.object(counterId), aggregatedKey, tx.object(keyServerId)],
     });
-
-    const result = await this.suiClient.signAndExecuteTransaction({
-      signer: this.adminKeypair,
-      transaction: tx,
-      options: { showEffects: true, showObjectChanges: true },
-    });
-
-    const created = result.objectChanges?.find(
-      (change) => change.type === "created" && change.objectType?.includes("MultiIBSCounter"),
-    );
-
-    if (!created || created.type !== "created") {
-      throw new Error("Failed to create Multi-IBS counter");
-    }
-
-    return created.objectId;
   }
 
-  /**
-   * Submit aggregated signature for verification and increment
-   *
-   * CHALLENGE: Real testnet execution requires actual Key Server objects
-   * Current approach: Skip complex AggregatedPublicKey setup for now
-   *
-   * For full implementation, would need:
-   * 1. Create AggregatedPublicKey with new_aggregated_public_key()
-   * 2. Add Key Server public keys with add_key_server_public_key()
-   * 3. Call verify_and_create_proof with proper aggregated key
-   * 4. Use returned proof to increment counter
-   */
-  async submitAggregatedSignature(
-    _counterId: string,
-    aggregatedSig: AggregatedSignature,
-  ): Promise<void> {
-    const tx = new Transaction();
+  // Step 3: Verify signature and create proof
+  const [proof] = counterPackage.multi_ibs_counter.verify_and_create_proof(tx, {
+    arguments: [
+      tx.object(counterId),
+      aggregatedKey,
+      tx.pure.vector("u8", Array.from(signature)),
+      tx.pure.vector("u8", Array.from(message)),
+    ],
+  });
 
-    // For now, skip full implementation due to Key Server complexity
-    // This would be the structure for real implementation:
+  // Step 4: Increment counter using proof
+  counterPackage.multi_ibs_counter.increment(tx, {
+    arguments: [tx.object(counterId), proof],
+  });
 
-    // Step 1: Create AggregatedPublicKey
-    // const aggregatedKey = tx.moveCall({
-    //   target: `${counterPackage.$address}::multi_ibs_counter::new_aggregated_public_key`,
-    //   arguments: [tx.object(counterId)],
-    // });
+  // Step 5: Clean up AggregatedPublicKey
+  counterPackage.multi_ibs_counter.destroy_aggregated_public_key(tx, {
+    arguments: [aggregatedKey],
+  });
 
-    // Step 2: Add Key Server public keys (requires actual Key Server objects)
-    // for each Key Server in threshold:
-    //   tx.moveCall({
-    //     target: `${counterPackage.$address}::multi_ibs_counter::add_key_server_public_key`,
-    //     arguments: [tx.object(counterId), aggregatedKey, tx.object(keyServerId)],
-    //   });
+  // Execute the transaction
+  const result = await client.signAndExecuteTransaction({
+    signer: keypair,
+    transaction: tx,
+    options: { showEffects: true },
+  });
 
-    // Step 3: Create AggregatedSignature struct
-    const _aggregatedSigStruct = tx.moveCall({
-      target: `${counterPackage.$address}::multi_ibs_counter::test_create_aggregated_signature`,
-      arguments: [
-        tx.pure.vector("u8", Array.from(aggregatedSig.signature)),
-        tx.pure.vector("u8", Array.from(aggregatedSig.message)),
-      ],
-    });
-
-    // Uncomment below for actual execution when Key Servers are available:
-    // const result = await this.suiClient.signAndExecuteTransaction({
-    //   signer: this.adminKeypair,
-    //   transaction: tx,
-    //   options: { showEffects: true },
-    // });
-
-    // if (result.effects?.status?.status !== "success") {
-    //   throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
-    // }
+  if (result.effects?.status?.status !== "success") {
+    throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
   }
 
-  // Helper methods
-  private bytesToBigInt(bytes: Uint8Array): bigint {
-    let result = 0n;
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) + BigInt(bytes[i]);
-    }
-    return result;
-  }
+  return result.digest;
+};
 
-  private bigIntToBytes(value: bigint, length: number): Uint8Array {
-    const result = new Uint8Array(length);
-    let currentValue = value; // Use local variable instead of modifying parameter
-    for (let i = length - 1; i >= 0; i--) {
-      result[i] = Number(currentValue & 0xffn);
-      currentValue >>= 8n;
-    }
-    return result;
+// Helper functions
+const bytesToBigInt = (bytes: Uint8Array): bigint => {
+  let result = 0n;
+  for (let i = 0; i < bytes.length; i++) {
+    result = (result << 8n) + BigInt(bytes[i]);
   }
-}
+  return result;
+};
+
+const bigIntToBytes = (value: bigint, length: number): Uint8Array => {
+  const result = new Uint8Array(length);
+  let currentValue = value; // Use local variable instead of modifying parameter
+  for (let i = length - 1; i >= 0; i--) {
+    result[i] = Number(currentValue & 0xffn);
+    currentValue >>= 8n;
+  }
+  return result;
+};
 
 describe("Multi-IBS Real BLS Signature Test", () => {
-  let aggregator: MultiBLSAggregator;
+  let client: SuiClient;
+  let keypair: Ed25519Keypair;
   let counterId: string;
 
   beforeAll(async () => {
-    aggregator = new MultiBLSAggregator();
+    client = new SuiClient({ url: getFullnodeUrl(NETWORK) });
+    const primeKeyInfo = getKeypair("PRIME");
+    keypair = primeKeyInfo.keypair;
   });
 
-  test("should aggregate secret keys correctly", () => {
-    const identity = "test-user-123";
-    const shares = aggregator.generateMockSecretKeyShares(identity, 3);
-
-    expect(shares).toHaveLength(3);
-    expect(shares[0].secretKey).toHaveLength(32);
-
-    const aggregatedSK = aggregator.aggregateSecretKeys(shares.slice(0, 2));
-    expect(aggregatedSK).toHaveLength(32);
-
-    // Different combinations should yield different results
-    const aggregatedSK2 = aggregator.aggregateSecretKeys([shares[0], shares[2]]);
-    expect(aggregatedSK).not.toEqual(aggregatedSK2);
+  test("should create Multi-IBS counter on testnet", async () => {
+    /**
+     * This test demonstrates Multi-IBS counter creation on testnet.
+     * Enabled for real testnet execution with:
+     * 1. Deployed Move contract (Package ID: 0x3000c25f352e2c91a99e0f7b9fb84f6fa86cc4e8ab819fbc83a6c47670bbba9e)
+     * 2. SUI tokens available from faucet
+     * 3. Real Key Server object IDs on testnet
+     */
+    counterId = await createMultiIBSCounter(client, keypair);
+    expect(counterId).toMatch(/^0x[a-f0-9]{64}$/);
   });
 
-  test("should create and verify BLS signatures", () => {
-    const identity = "test-user-456";
+  test("should fetch real secret keys from Key Servers", async () => {
+    if (!counterId) throw new Error("Counter ID not available - run counter creation test first");
+
+    const threshold = 2;
+
+    const shares = await fetchRealSecretKeyShares(client, counterId, keypair, threshold);
+
+    expect(shares).toHaveLength(threshold);
+    expect(shares[0].secretKey).toHaveLength(48); // G1 compressed point is 48 bytes
+
+    const aggregatedSK = aggregateSecretKeys(shares);
+    expect(aggregatedSK).toHaveLength(32); // Aggregated scalar is 32 bytes
+  });
+
+  test("should create and verify BLS signatures with real keys", async () => {
+    if (!counterId) throw new Error("Counter ID not available - run counter creation test first");
+
     const message = "increment-counter-test";
 
-    // Generate key shares and aggregate
-    const shares = aggregator.generateMockSecretKeyShares(identity, 2);
-    const aggregatedSK = aggregator.aggregateSecretKeys(shares);
-    const aggregatedPK = aggregator.getPublicKey(aggregatedSK);
+    // Fetch real key shares and aggregate
+    const shares = await fetchRealSecretKeyShares(client, counterId, keypair, 2);
+    const aggregatedSK = aggregateSecretKeys(shares);
+    const aggregatedPK = getPublicKey(aggregatedSK);
 
     // Create signature
-    const signature = aggregator.signMessage(aggregatedSK, message);
+    const signature = signMessage(aggregatedSK, message);
     expect(signature).toHaveLength(48); // G1 signature is 48 bytes
 
     // Verify signature
-    const isValid = aggregator.verifyAggregatedSignature(signature, message, aggregatedPK);
+    const isValid = verifyAggregatedSignature(signature, message, aggregatedPK);
     expect(isValid).toBe(true);
 
     // Wrong message should fail
-    const isInvalid = aggregator.verifyAggregatedSignature(
-      signature,
-      "wrong-message",
-      aggregatedPK,
-    );
+    const isInvalid = verifyAggregatedSignature(signature, "wrong-message", aggregatedPK);
     expect(isInvalid).toBe(false);
   });
 
-  test("should demonstrate threshold signature (2-of-3)", () => {
-    const identity = "threshold-test-789";
+  test("should demonstrate threshold signature with real Key Servers", async () => {
+    if (!counterId) throw new Error("Counter ID not available - run counter creation test first");
+
     const message = "threshold-signature-test";
 
-    // Generate all 3 shares
-    const allShares = aggregator.generateMockSecretKeyShares(identity, 3);
+    // Fetch 3 shares but use only 2 (threshold)
+    const allShares = await fetchRealSecretKeyShares(client, counterId, keypair, 3);
 
     // Test different combinations of 2 shares
-    const combo1 = aggregator.aggregateSecretKeys([allShares[0], allShares[1]]);
-    const combo2 = aggregator.aggregateSecretKeys([allShares[0], allShares[2]]);
-    const combo3 = aggregator.aggregateSecretKeys([allShares[1], allShares[2]]);
+    const combo1 = aggregateSecretKeys([allShares[0], allShares[1]]);
+    const combo2 = aggregateSecretKeys([allShares[0], allShares[2]]);
+    const combo3 = aggregateSecretKeys([allShares[1], allShares[2]]);
 
     // All combinations should produce valid signatures
-    const sig1 = aggregator.signMessage(combo1, message);
-    const sig2 = aggregator.signMessage(combo2, message);
-    const sig3 = aggregator.signMessage(combo3, message);
+    const sig1 = signMessage(combo1, message);
+    const sig2 = signMessage(combo2, message);
+    const sig3 = signMessage(combo3, message);
 
     expect(sig1).toHaveLength(48);
     expect(sig2).toHaveLength(48);
@@ -411,103 +425,40 @@ describe("Multi-IBS Real BLS Signature Test", () => {
     expect(sig1).not.toEqual(sig3);
   });
 
-  test("should create Multi-IBS counter on testnet", async () => {
-    /**
-     * This test demonstrates Multi-IBS counter creation on testnet.
-     * Enabled for real testnet execution with:
-     * 1. Deployed Move contract (Package ID: 0x3000c25f352e2c91a99e0f7b9fb84f6fa86cc4e8ab819fbc83a6c47670bbba9e)
-     * 2. SUI tokens available from faucet
-     * 3. Real Key Server object IDs on testnet
-     */
-    counterId = await aggregator.createMultiIBSCounter();
-    expect(counterId).toMatch(/^0x[a-f0-9]{64}$/);
-  });
+  test("should aggregate keys and increment counter with real Key Servers", async () => {
+    if (!counterId) throw new Error("Counter ID not available - run counter creation test first");
 
-  test("should demonstrate signature submission structure", async () => {
-    /**
-     * This test shows the structure for real signature submission
-     * without actually executing on testnet (which would require Key Servers)
-     */
+    const identity = keypair.getPublicKey().toSuiAddress();
+    const message = `increment-real-test-${Date.now()}`;
 
-    // Generate a mock counter ID for demonstration
-    const mockCounterId = `0x${"0".repeat(64)}`;
+    // Step 1: Fetch real secret keys from Key Servers
+    const shares = await fetchRealSecretKeyShares(client, counterId, keypair, THRESHOLD);
 
-    const identity = "demo-user-999";
-    const message = "increment-demo-counter";
+    // Step 2: Aggregate secret keys
+    const aggregatedSK = aggregateSecretKeys(shares);
 
-    // Step 1: Generate and aggregate secret keys (same as production)
-    const shares = aggregator.generateMockSecretKeyShares(identity, 2);
-    const aggregatedSK = aggregator.aggregateSecretKeys(shares);
-    const signature = aggregator.signMessage(aggregatedSK, message);
+    // Step 3: Create BLS signature
+    const signature = signMessage(aggregatedSK, message);
+    const messageBytes = new TextEncoder().encode(message);
 
-    // Step 2: Create aggregated signature (matches Move contract struct)
-    const aggregatedSig: AggregatedSignature = {
-      signature,
-      message: new TextEncoder().encode(message),
-      // Note: No signerIndices - removed from design for clarity
-    };
+    // Step 4: Get Key Server IDs for threshold
+    const keyServerIds = shares.map(share => share.serverId);
+    console.log("Key Server IDs:", keyServerIds);
+    console.log("Counter ID:", counterId);
+    console.log("Signature length:", signature.length);
 
-    // Step 3: Demonstrate transaction structure (without execution)
-    await aggregator.submitAggregatedSignature(mockCounterId, aggregatedSig);
-
-    // Verify the signature format is correct
-    expect(aggregatedSig.signature).toHaveLength(48); // G1 signature
-    expect(aggregatedSig.message.length).toBeGreaterThan(0); // Has message
-  });
-
-  test.skip("should test real Key Server integration", async () => {
-    /**
-     * REAL KEY SERVER INTEGRATION TEST
-     *
-     * This test demonstrates actual Seal Key Server integration:
-     * 1. Fetching sk_ID_i from real Key Servers on testnet
-     * 2. Aggregating actual IBE secret keys
-     * 3. Creating real Multi-IBS signatures
-     * 4. Submitting to testnet for verification
-     *
-     * Currently skipped because:
-     * - Requires Key Server session approval
-     * - Needs user wallet interaction for authorization
-     * - May require Key Server operator coordination
-     *
-     * To enable: Remove .skip when Key Servers are ready for testing
-     */
-    if (!counterId) {
-      throw new Error("Counter ID not available - run counter creation test first");
-    }
-
-    const identity = aggregator.adminKeypair.getPublicKey().toSuiAddress();
-    const message = `real-key-server-test-${Date.now()}`;
-
-    // Import SealMultiIBSAggregator for real Key Server integration
-    const { SealMultiIBSAggregator } = await import("../scripts/multi-ibs-with-seal.ts");
-    const sealAggregator = new SealMultiIBSAggregator();
-
-    // Step 1: Fetch real Key Server shares
-    const keyShares = await sealAggregator.fetchSecretKeyShares(
-      identity,
-      aggregator.adminKeypair,
-      2,
-    );
-
-    // Step 2: Aggregate real secret keys
-    const aggregatedSK = sealAggregator.aggregateSecretKeys(keyShares);
-    const aggregatedPK = sealAggregator.getPublicKey(aggregatedSK);
-
-    // Step 3: Create Multi-IBS signature
-    const multiSig = sealAggregator.createMultiIBSSignature(aggregatedSK, message, identity);
-
-    // Step 4: Verify locally before submission
-    const isValid = sealAggregator.verifyMultiIBSSignature(multiSig, aggregatedPK);
-    expect(isValid).toBe(true);
-
-    // Step 5: Submit to testnet (would require full Key Server setup)
-    const txDigest = await sealAggregator.submitMultiIBSSignature(
+    // Step 5: Submit aggregated signature and increment counter
+    const txDigest = await submitAggregatedSignature(
+      client,
+      keypair,
       counterId,
-      multiSig,
-      aggregator.adminKeypair,
+      keyServerIds,
+      signature,
+      messageBytes,
     );
 
     expect(txDigest).toMatch(/^[A-Za-z0-9]{43,44}$/); // Sui transaction digest format
+    expect(signature).toHaveLength(48); // G1 signature
   });
+
 });
