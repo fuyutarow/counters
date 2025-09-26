@@ -39,7 +39,10 @@ const DOMAIN_SEPARATOR_BLS: vector<u8> = b"SUI-MULTI-IBS-V1";
 const EInvalidThreshold: vector<u8> = b"Invalid threshold: must be between 1 and key server count";
 
 #[error]
-const EInsufficientSignatures: vector<u8> = b"Signature count below required threshold";
+const EInsufficientSignatures: vector<u8> = b"Contributor count below required threshold";
+
+#[error]
+const EContributorCountMismatch: vector<u8> = b"Signature and key contributor counts do not match";
 
 #[error]
 const EDuplicateKeyServer: vector<u8> = b"Duplicate key server detected";
@@ -87,18 +90,20 @@ public struct AggregatedPublicKey has key {
     public_key_g2: Element<G2>,
     /// ID of the associated counter
     counter_id: ID,
-    /// IDs of key servers included in aggregation
+    /// Number of key servers included in aggregation
+    key_server_count: u64,
+    /// Key servers already included (for duplicate prevention only)
     included_key_server_ids: vector<ID>,
 }
 
-/// Bundle of aggregated BLS signature data from multiple key servers
+/// Single aggregated BLS signature from multiple key servers
 public struct AggregatedSignature has drop {
     /// Aggregated BLS signature in G1 (48 bytes compressed)
     signature_g1: vector<u8>,
-    /// Indices of participating key servers
-    signer_indices: vector<u32>,
     /// Original message that was signed
     message: vector<u8>,
+    /// Number of key servers that contributed to this aggregation
+    contributor_count: u64,
 }
 
 // === Public Functions ===
@@ -134,16 +139,13 @@ public fun verify_and_create_proof(
     aggregated_signature: AggregatedSignature,
     ctx: &mut TxContext,
 ): MultiIBSProof {
-    let signer_count = aggregated_signature.signer_indices.length();
+    let contributor_count = aggregated_signature.contributor_count;
 
     // Check threshold requirement
-    assert!(signer_count >= counter.config.threshold, EInsufficientSignatures);
+    assert!(contributor_count >= counter.config.threshold, EInsufficientSignatures);
 
-    // Verify no duplicate signers and indices are valid
-    validate_signer_indices(
-        &aggregated_signature.signer_indices,
-        counter.config.key_server_ids.length(),
-    );
+    // Check contributor count matches aggregated key
+    assert!(contributor_count == aggregated_key.key_server_count, EContributorCountMismatch);
 
     // Verify the aggregated signature
     assert!(
@@ -158,7 +160,7 @@ public fun verify_and_create_proof(
     MultiIBSProof {
         id: object::new(ctx),
         counter_id: object::id(counter),
-        verified_signer_count: signer_count,
+        verified_signer_count: contributor_count,
     }
 }
 
@@ -181,6 +183,7 @@ public fun create_aggregated_public_key(
         id: object::new(ctx),
         public_key_g2: g2_identity(),
         counter_id: object::id(counter),
+        key_server_count: 0,
         included_key_server_ids: vector[],
     }
 }
@@ -209,8 +212,9 @@ public fun add_key_server_public_key(
     aggregated_key.public_key_g2 =
         g2_add(&aggregated_key.public_key_g2, &key_server.pk_as_bf_bls12381());
 
-    // Record this Key Server as included
+    // Record this Key Server as included and increment count
     aggregated_key.included_key_server_ids.push_back(key_server_id);
+    aggregated_key.key_server_count = aggregated_key.key_server_count + 1;
 }
 
 // === Private Functions ===
@@ -246,20 +250,6 @@ fun verify_bls_signature(
     let message_pairing = pairing(&message_hash_g1, &aggregated_key.public_key_g2);
 
     signature_pairing == message_pairing
-}
-
-/// Validate that signer indices are within bounds and unique
-fun validate_signer_indices(indices: &vector<u32>, max_index: u64) {
-    let mut seen_indices = vector[];
-
-    indices.do_ref!(|index| {
-        // Check bounds
-        assert!((*index as u64) < max_index, EKeyServerNotRegistered);
-
-        // Check for duplicates
-        assert!(!seen_indices.contains(index), EDuplicateKeyServer);
-        seen_indices.push_back(*index);
-    });
 }
 
 // === View Functions ===
@@ -302,18 +292,41 @@ public fun included_key_server_count(self: &AggregatedPublicKey): u64 {
     self.included_key_server_ids.length()
 }
 
+/// Destroy AggregatedPublicKey object
+public fun destroy_aggregated_public_key(key: AggregatedPublicKey) {
+    let AggregatedPublicKey {
+        id,
+        public_key_g2: _,
+        counter_id: _,
+        key_server_count: _,
+        included_key_server_ids: _,
+    } = key;
+    object::delete(id);
+}
+
+/// Destroy MultiIBSProof object (for testing only)
+#[test_only]
+public fun test_destroy_proof(proof: MultiIBSProof) {
+    let MultiIBSProof {
+        id,
+        counter_id: _,
+        verified_signer_count: _,
+    } = proof;
+    object::delete(id);
+}
+
 // === Test Helper Functions ===
 
 #[test_only]
 public fun test_create_aggregated_signature(
     signature_g1: vector<u8>,
-    signer_indices: vector<u32>,
     message: vector<u8>,
+    contributor_count: u64,
 ): AggregatedSignature {
     AggregatedSignature {
         signature_g1,
-        signer_indices,
         message,
+        contributor_count,
     }
 }
 
@@ -337,6 +350,7 @@ public fun test_create_counter(
 
 #[test_only]
 public fun test_destroy_counter(counter: MultiIBSCounter) {
-    let MultiIBSCounter { id, value: _, config: _ } = counter;
+    let MultiIBSCounter { id, value: _, config } = counter;
+    let MultiIBSConfig { key_server_ids: _, threshold: _ } = config;
     object::delete(id);
 }

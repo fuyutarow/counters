@@ -304,7 +304,7 @@ public fun test_create_signature_bundle(
 
 #[test_only]
 public fun test_destroy_config(config: TIBSConfig) {
-    let TIBSConfig { id, namespace: _, signers: _, required_signatures: _ } = config;
+    let TIBSConfig { id, package_id: _, signers: _, required_signatures: _ } = config;
     object::delete(id);
 }
 
