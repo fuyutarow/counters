@@ -161,7 +161,7 @@ class MultiIBSAggregator {
         const identityHex = `0x${Buffer.from(identityBytes).toString("hex")}`;
 
         // Get encrypted data (placeholder - in real usage this would be actual encrypted data)
-        const { encryptedObject } = await this.sealClient.encrypt({
+        const _encryptedData = await this.sealClient.encrypt({
           threshold: 1,
           packageId: PACKAGE_ID,
           id: identityHex,

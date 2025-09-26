@@ -1,7 +1,8 @@
 {
   "testnet": {
     "packages": {
-      "counter": "0xcbd7ef54f57ea1a999c0843a3c41afa7794b1a9687dd6f6f028d7ee9bd4d8afe",
+      "counter": "0x3000c25f352e2c91a99e0f7b9fb84f6fa86cc4e8ab819fbc83a6c47670bbba9e",
+      "seal": "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50",
       "sui": "0x2"
     }
   },

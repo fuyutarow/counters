@@ -78,7 +78,13 @@
       "Bash(rg:*)",
       "Bash(m t:*)",
       "mcp__serena__read_memory",
-      "WebFetch(domain:crypto.stanford.edu)"
+      "WebFetch(domain:crypto.stanford.edu)",
+      "Read(//home/fuyu/OPENJPY/counters/dpp-pilot/__tests__/**)",
+      "Read(//home/fuyu/OPENJPY/counters/dpp-pilot/**)",
+      "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/move/seal/sources/**)",
+      "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/sui/crates/sui-framework/docs/sui/**)",
+      "Bash(bun:*)",
+      "Bash(sui client:*)"
     ],
     "deny": [],
     "ask": []
