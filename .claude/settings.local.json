@@ -91,7 +91,10 @@
       "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/crates/crypto/src/**)",
       "Bash(node:*)",
       "Bash(tsx scripts/multi-ibs-with-seal.ts:*)",
-      "Bash(sui keytool:*)"
+      "Bash(sui keytool:*)",
+      "Bash(m f)",
+      "Bash(sui:*)",
+      "Bash(DEBUG=true bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi)"
     ],
     "deny": [],
     "ask": []
