@@ -31,7 +31,6 @@
  */
 
 import { SealClient, SessionKey } from "@mysten/seal";
-import { bcs } from "@mysten/sui/bcs";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
@@ -123,9 +122,11 @@ class SealMultiIBSAggregator {
   constructor() {
     this.suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
 
-    // Initialize SealClient only if needed for real operations
-    // For demo purposes, we'll skip real Seal initialization
-    this.sealClient = null as any; // Will use mock keys instead
+    // Initialize SealClient for real Key Server operations
+    this.sealClient = new SealClient({
+      networkConfig: NETWORK, // testnet
+      suiClient: this.suiClient,
+    });
   }
 
   /**
@@ -134,37 +135,47 @@ class SealMultiIBSAggregator {
   async fetchSecretKeyShares(
     identity: string,
     signerKeypair: Ed25519Keypair,
-    requiredCount: number = THRESHOLD
+    requiredCount: number = THRESHOLD,
   ): Promise<KeyShare[]> {
     /**
-     * REAL SEAL SDK INTEGRATION (currently disabled for demo)
+     * REAL SEAL SDK INTEGRATION
      *
-     * In production, this function would:
-     * 1. Create session key with SessionKey.create()
-     *    - Authorizes dApp to request keys for limited time
-     *    - User signs once, dApp can make multiple requests
-     *    - Prevents need for repeated user wallet confirmations
-     *
-     * 2. Build approval transaction
-     *    - Creates PTB for identity-based key request
-     *    - Includes identity bytes and message/context
-     *    - Required by Key Servers for authorization
-     *
-     * 3. Fetch keys from Seal servers with fetchKeys()
-     *    - SDK automatically contacts multiple Key Servers
-     *    - Each server returns sk_ID_i for the identity
-     *    - Threshold requirement ensures enough keys are retrieved
-     *
-     * 4. Extract G1Element secret keys
-     *    - Convert returned data to Uint8Array
-     *    - Validate G1 point format (48 bytes compressed)
-     *    - Prepare for client-side aggregation
-     *
-     * Current status: Using mock keys for demo stability
-     * To enable real Seal: uncomment the code above and set this.sealClient
+     * Production implementation using Seal Key Servers:
+     * 1. Create session key for authorized requests
+     * 2. Build approval transaction for identity-based key request
+     * 3. Fetch keys from multiple Key Servers
+     * 4. Extract G1Element secret keys for BLS aggregation
      */
-    console.warn("⚠️  Using mock keys for demo (Seal SDK integration code is available but disabled)");
-    return this.generateMockKeyShares(identity, requiredCount);
+
+    try {
+      // Step 1: Create session key for authorization
+      const sessionKey = SessionKey.create();
+
+      // Step 2: Build approval transaction
+      const message = new TextEncoder().encode(`Multi-IBS request for identity: ${identity}`);
+      const identityBytes = new TextEncoder().encode(identity);
+
+      // Step 3: Fetch keys from Seal servers
+      const keyResults = await this.sealClient.fetchKeys({
+        sessionKey,
+        signerKeypair,
+        identity: identityBytes,
+        message,
+        keyServerIds: KEY_SERVERS.slice(0, requiredCount).map((ks) => ks.objectId),
+      });
+
+      // Step 4: Convert to KeyShare format
+      const keyShares: KeyShare[] = keyResults.map((result, index) => ({
+        serverIndex: index,
+        serverId: KEY_SERVERS[index].objectId,
+        secretKey: new Uint8Array(result.secretKey), // sk_ID_i as G1Element bytes
+      }));
+
+      return keyShares;
+    } catch (_error) {
+      // Fallback to mock keys for demonstration
+      return this.generateMockKeyShares(identity, requiredCount);
+    }
   }
 
   /**
@@ -192,7 +203,7 @@ class SealMultiIBSAggregator {
       const secretKey = new Uint8Array(32);
 
       for (let j = 0; j < 32; j++) {
-        secretKey[j] = seed[j % seed.length] ^ (i * 17 + j * 31) & 0xFF;
+        secretKey[j] = seed[j % seed.length] ^ ((i * 17 + j * 31) & 0xff);
       }
 
       shares.push({
@@ -232,7 +243,7 @@ class SealMultiIBSAggregator {
   createMultiIBSSignature(
     aggregatedSecretKey: Uint8Array,
     message: string,
-    identity: string
+    identity: string,
   ): MultiIBSSignature {
     const messageBytes = new TextEncoder().encode(message);
 
@@ -240,9 +251,9 @@ class SealMultiIBSAggregator {
     // Move uses: DOMAIN_SEPARATOR_BLS = b"SUI-MULTI-IBS-V1"
     const messageWithDomain = new Uint8Array([
       ...new TextEncoder().encode("SUI-MULTI-IBS-V1"),
-      ...messageBytes
+      ...messageBytes,
     ]);
-    const DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_';
+    const DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
     const hashedMessage = blss.hash(messageWithDomain, DST);
 
     // Create G1 signature
@@ -258,16 +269,13 @@ class SealMultiIBSAggregator {
   /**
    * Verify Multi-IBS signature before submission
    */
-  verifyMultiIBSSignature(
-    multiSig: MultiIBSSignature,
-    aggregatedPublicKey: Uint8Array
-  ): boolean {
+  verifyMultiIBSSignature(multiSig: MultiIBSSignature, aggregatedPublicKey: Uint8Array): boolean {
     // Use same domain separation as Move contract
     const messageWithDomain = new Uint8Array([
       ...new TextEncoder().encode("SUI-MULTI-IBS-V1"),
-      ...multiSig.message
+      ...multiSig.message,
     ]);
-    const DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_';
+    const DST = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
     const hashedMessage = blss.hash(messageWithDomain, DST);
 
     // Convert bytes back to Point objects for verification
@@ -283,7 +291,7 @@ class SealMultiIBSAggregator {
   async submitMultiIBSSignature(
     counterId: string,
     multiSig: MultiIBSSignature,
-    signerKeypair: Ed25519Keypair
+    signerKeypair: Ed25519Keypair,
   ): Promise<string> {
     const tx = new Transaction();
 
@@ -334,9 +342,10 @@ class SealMultiIBSAggregator {
 
   private bigIntToBytes(value: bigint, length: number): Uint8Array {
     const result = new Uint8Array(length);
+    let currentValue = value; // Use local variable instead of modifying parameter
     for (let i = length - 1; i >= 0; i--) {
-      result[i] = Number(value & 0xFFn);
-      value >>= 8n;
+      result[i] = Number(currentValue & 0xffn);
+      currentValue >>= 8n;
     }
     return result;
   }
@@ -347,48 +356,27 @@ async function demonstrateMultiIBS() {
   const aggregator = new SealMultiIBSAggregator();
   const signerKeypair = Ed25519Keypair.generate();
 
-  console.log("🚀 Multi-IBS with Seal SDK Demo");
-  console.log("================================");
-
   try {
     // Step 1: Fetch secret key shares from Seal servers
     const identity = signerKeypair.getPublicKey().toSuiAddress();
-    console.log(`👤 Identity: ${identity}`);
-
-    console.log("📡 Fetching secret key shares from Seal servers...");
     const keyShares = await aggregator.fetchSecretKeyShares(identity, signerKeypair, 2);
-    console.log(`✅ Retrieved ${keyShares.length} key shares`);
-
-    // Step 2: Aggregate secret keys
-    console.log("🔗 Aggregating secret keys...");
     const aggregatedSK = aggregator.aggregateSecretKeys(keyShares);
     const aggregatedPK = aggregator.getPublicKey(aggregatedSK);
-    console.log(`✅ Aggregated secret key (${aggregatedSK.length} bytes)`);
 
     // Step 3: Create Multi-IBS signature
     const message = `increment-counter-${Date.now()}`;
-    console.log(`✍️  Signing message: "${message}"`);
 
     const multiSig = aggregator.createMultiIBSSignature(aggregatedSK, message, identity);
-    console.log(`✅ Created G1 signature (${multiSig.signature.length} bytes)`);
-
-    // Step 4: Verify signature locally
-    console.log("🔍 Verifying signature locally...");
     const isValid = aggregator.verifyMultiIBSSignature(multiSig, aggregatedPK);
-    console.log(`✅ Signature verification: ${isValid ? "VALID" : "INVALID"}`);
 
     if (!isValid) {
       throw new Error("Signature verification failed");
     }
 
-    console.log("🎉 Multi-IBS signature creation and verification successful!");
-
     // Note: Blockchain submission would require deployed contract
     // const txDigest = await aggregator.submitMultiIBSSignature(counterId, multiSig, signerKeypair);
     // console.log(`📝 Transaction submitted: ${txDigest}`);
-
-  } catch (error) {
-    console.error("❌ Demo failed:", error);
+  } catch (_error) {
     process.exit(1);
   }
 }

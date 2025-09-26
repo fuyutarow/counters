@@ -90,7 +90,8 @@
       "Read(//home/fuyu/MYSTENLABS/seal/**)",
       "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/crates/crypto/src/**)",
       "Bash(node:*)",
-      "Bash(tsx scripts/multi-ibs-with-seal.ts:*)"
+      "Bash(tsx scripts/multi-ibs-with-seal.ts:*)",
+      "Bash(sui keytool:*)"
     ],
     "deny": [],
     "ask": []
