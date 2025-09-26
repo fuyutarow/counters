@@ -75,30 +75,30 @@ const ELengthMismatch: vector<u8> = b"Seal shard IDs and public keys vectors mus
 
 // === Structs ===
 
-/// Configuration for Seal Shard verification
-/// Stores public keys in Table mapped by Key Server ID
-public struct SealShardConfig has store {
-    seal_shard_table: Table<ID, Element<G2>>, // Key Server ID → Public Key
+/// Configuration for Multi-IBS verification
+/// Stores seal shard public keys in Table mapped by Key Server ID
+public struct MultiIBSConfig has store {
+    seal_shard_table: Table<ID, Element<G2>>, // Key Server ID → Seal Shard Public Key
     threshold: u64, // Minimum required signatures (t)
 }
 
-/// Counter protected by Seal Shard aggregated signatures
-public struct SealShardCounter has key {
+/// Counter protected by Multi-IBS aggregated signatures
+public struct MultiIBSCounter has key {
     id: UID,
     value: u64,
-    config: SealShardConfig, // Embedded config for simplicity
+    config: MultiIBSConfig, // Embedded config for simplicity
 }
 
 /// One-time proof token for counter operations
 /// Prevents replay attacks by consuming proof after use
-public struct SealShardProof has key {
+public struct MultiIBSProof has key {
     id: UID,
     counter_id: ID,
     verified_signer_count: u64, // Number of signatures verified
 }
 
 /// Aggregated public key for BLS signature verification
-public struct AggregatedSealShardKey has key {
+public struct AggregatedPublicKey has key {
     id: UID,
     /// Accumulated public key in G2 group
     public_key_g2: Element<G2>,
@@ -137,12 +137,12 @@ public fun share(
         i = i + 1;
     };
 
-    let config = SealShardConfig {
+    let config = MultiIBSConfig {
         seal_shard_table,
         threshold,
     };
 
-    let counter = SealShardCounter {
+    let counter = MultiIBSCounter {
         id: object::new(ctx),
         value: 0,
         config,
@@ -154,12 +154,12 @@ public fun share(
 /// Verify aggregated signature and create one-time proof token
 /// This is the core function that performs BLS signature aggregation verification
 public fun verify_and_create_proof(
-    counter: &SealShardCounter,
-    aggregated_key: &AggregatedSealShardKey,
+    counter: &MultiIBSCounter,
+    aggregated_key: &AggregatedPublicKey,
     signature_g1_bytes: vector<u8>,
     message: vector<u8>,
     ctx: &mut TxContext,
-): SealShardProof {
+): MultiIBSProof {
     // Check threshold requirement using authenticated seal shard count
     assert!(aggregated_key.seal_shard_count >= counter.config.threshold, EInsufficientSignatures);
 
@@ -173,7 +173,7 @@ public fun verify_and_create_proof(
         ESignatureVerificationFailed,
     );
 
-    SealShardProof {
+    MultiIBSProof {
         id: object::new(ctx),
         counter_id: object::id(counter),
         verified_signer_count: aggregated_key.seal_shard_count,
@@ -181,8 +181,8 @@ public fun verify_and_create_proof(
 }
 
 /// Increment counter using proof token
-public fun increment(counter: &mut SealShardCounter, proof: SealShardProof) {
-    let SealShardProof { id, counter_id, verified_signer_count: _ } = proof;
+public fun increment(counter: &mut MultiIBSCounter, proof: MultiIBSProof) {
+    let MultiIBSProof { id, counter_id, verified_signer_count: _ } = proof;
 
     assert!(counter_id == object::id(counter), ECounterMismatch);
     counter.value = counter.value + 1;
@@ -191,11 +191,11 @@ public fun increment(counter: &mut SealShardCounter, proof: SealShardProof) {
 }
 
 /// Creates a new aggregated seal shard key associated with a counter
-public fun new_aggregated_seal_shard_key(
-    counter: &SealShardCounter,
+public fun new_aggregated_public_key(
+    counter: &MultiIBSCounter,
     ctx: &mut TxContext,
-): AggregatedSealShardKey {
-    AggregatedSealShardKey {
+): AggregatedPublicKey {
+    AggregatedPublicKey {
         id: object::new(ctx),
         public_key_g2: g2_identity(),
         counter_id: object::id(counter),
@@ -206,8 +206,8 @@ public fun new_aggregated_seal_shard_key(
 
 /// Add a seal shard's public key to the aggregated key
 public fun aggregate_seal_shard_pubkey(
-    counter: &SealShardCounter,
-    aggregated_key: &mut AggregatedSealShardKey,
+    counter: &MultiIBSCounter,
+    aggregated_key: &mut AggregatedPublicKey,
     seal_shard_id: ID,
 ) {
     // Counter ID verification
@@ -246,7 +246,7 @@ fun assert_all_unique<T: drop + copy>(items: &vector<T>) {
 fun verify_bls_signature(
     signature_g1_bytes: &vector<u8>,
     message: &vector<u8>,
-    aggregated_key: &AggregatedSealShardKey,
+    aggregated_key: &AggregatedPublicKey,
 ): bool {
     // Parse signature from G1 bytes
     let signature_g1 = g1_from_bytes(signature_g1_bytes);
@@ -268,47 +268,47 @@ fun verify_bls_signature(
 
 // === View Functions ===
 
-public fun value(self: &SealShardCounter): u64 {
+public fun value(self: &MultiIBSCounter): u64 {
     self.value
 }
 
-public fun threshold(self: &SealShardCounter): u64 {
+public fun threshold(self: &MultiIBSCounter): u64 {
     self.config.threshold
 }
 
-public fun seal_shard_count(self: &SealShardCounter): u64 {
+public fun seal_shard_count(self: &MultiIBSCounter): u64 {
     self.config.seal_shard_table.length()
 }
 
-public fun seal_shard_table(self: &SealShardCounter): &Table<ID, Element<G2>> {
+public fun seal_shard_table(self: &MultiIBSCounter): &Table<ID, Element<G2>> {
     &self.config.seal_shard_table
 }
 
 // === AggregatedSealShardKey View Functions ===
 
 /// Get the aggregated G2 public key
-public fun public_key_g2(self: &AggregatedSealShardKey): &Element<G2> {
+public fun public_key_g2(self: &AggregatedPublicKey): &Element<G2> {
     &self.public_key_g2
 }
 
 /// Get the counter ID associated with this aggregated key
-public fun aggregated_key_counter_id(self: &AggregatedSealShardKey): ID {
+public fun aggregated_key_counter_id(self: &AggregatedPublicKey): ID {
     self.counter_id
 }
 
 /// Get the seal shard IDs included in the aggregation
-public fun included_seal_shard_ids(self: &AggregatedSealShardKey): &vector<ID> {
+public fun included_seal_shard_ids(self: &AggregatedPublicKey): &vector<ID> {
     &self.included_seal_shard_ids
 }
 
 /// Get the count of seal shards included in the aggregation
-public fun included_seal_shard_count(self: &AggregatedSealShardKey): u64 {
+public fun included_seal_shard_count(self: &AggregatedPublicKey): u64 {
     self.included_seal_shard_ids.length()
 }
 
 /// Destroy AggregatedSealShardKey object
-public fun destroy_aggregated_seal_shard_key(key: AggregatedSealShardKey) {
-    let AggregatedSealShardKey {
+public fun destroy_aggregated_public_key(key: AggregatedPublicKey) {
+    let AggregatedPublicKey {
         id,
         public_key_g2: _,
         counter_id: _,
@@ -320,8 +320,8 @@ public fun destroy_aggregated_seal_shard_key(key: AggregatedSealShardKey) {
 
 /// Destroy SealShardProof object (for testing only)
 #[test_only]
-public fun test_destroy_proof(proof: SealShardProof) {
-    let SealShardProof {
+public fun test_destroy_proof(proof: MultiIBSProof) {
+    let MultiIBSProof {
         id,
         counter_id: _,
         verified_signer_count: _,
@@ -333,7 +333,7 @@ public fun test_destroy_proof(proof: SealShardProof) {
 
 /// Seal approve function for Seal Shard counter access
 /// InnerID structure: counter_id || signer_address
-entry fun seal_approve(id: vector<u8>, counter: &SealShardCounter, _ctx: &TxContext) {
+entry fun seal_approve(id: vector<u8>, counter: &MultiIBSCounter, _ctx: &TxContext) {
     // Construct expected InnerID: counter_id || signer_address
     let mut expected_inner_id = object::id(counter).to_bytes();
     let signer_bytes = bcs::to_bytes(&_ctx.sender());
@@ -351,7 +351,7 @@ public fun test_create_counter(
     seal_shard_pubkey_bytes: vector<vector<u8>>,
     threshold: u64,
     ctx: &mut TxContext,
-): SealShardCounter {
+): MultiIBSCounter {
     let mut seal_shard_table = new<ID, Element<G2>>(ctx);
     let mut i = 0;
     while (i < seal_shard_ids.length()) {
@@ -361,12 +361,12 @@ public fun test_create_counter(
         i = i + 1;
     };
 
-    let config = SealShardConfig {
+    let config = MultiIBSConfig {
         seal_shard_table,
         threshold,
     };
 
-    SealShardCounter {
+    MultiIBSCounter {
         id: object::new(ctx),
         value: 0,
         config,
@@ -374,9 +374,9 @@ public fun test_create_counter(
 }
 
 #[test_only]
-public fun test_destroy_counter(counter: SealShardCounter) {
-    let SealShardCounter { id, value: _, config } = counter;
-    let SealShardConfig { seal_shard_table, threshold: _ } = config;
+public fun test_destroy_counter(counter: MultiIBSCounter) {
+    let MultiIBSCounter { id, value: _, config } = counter;
+    let MultiIBSConfig { seal_shard_table, threshold: _ } = config;
 
     // For testing, we assume the table might not be empty
     // In practice, dropping the table will handle cleanup automatically
@@ -387,11 +387,11 @@ public fun test_destroy_counter(counter: SealShardCounter) {
 /// Test helper: Create proof without signature verification
 #[test_only]
 public fun test_create_proof(
-    counter: &SealShardCounter,
+    counter: &MultiIBSCounter,
     verified_signer_count: u64,
     ctx: &mut TxContext,
-): SealShardProof {
-    SealShardProof {
+): MultiIBSProof {
+    MultiIBSProof {
         id: object::new(ctx),
         counter_id: object::id(counter),
         verified_signer_count,
