@@ -59,11 +59,9 @@ fun test_basic_verification() {
     {
         let counter = ts::take_shared<MultiIBSCounter>(&scenario);
 
-        // Create aggregated signature
-        let _aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
-            x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // dummy signature
-            b"test message",
-        );
+        // Create mock signature data
+        let _signature_g1_bytes = x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"; // dummy signature
+        let _message = b"test message";
 
         let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
             &counter,
@@ -90,11 +88,9 @@ fun test_insufficient_signatures() {
     {
         let counter = ts::take_shared<MultiIBSCounter>(&scenario);
 
-        // Create aggregated signature (aggregated key will have 0 key servers, threshold is 2)
-        let aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
-            x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-            b"test message",
-        );
+        // Create mock signature data (aggregated key will have 0 key servers, threshold is 2)
+        let signature_g1_bytes = x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let message = b"test message";
 
         let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
             &counter,
@@ -104,7 +100,8 @@ fun test_insufficient_signatures() {
         let _proof = multi_ibs_counter::verify_and_create_proof(
             &counter,
             &aggregated_key,
-            aggregated_sig,
+            signature_g1_bytes,
+            message,
             ctx(&mut scenario),
         );
 
@@ -130,11 +127,9 @@ fun test_counter_increment_with_mock_proof() {
     {
         let counter = ts::take_shared<MultiIBSCounter>(&scenario);
 
-        // Create aggregated signature and key for testing
-        let _aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
-            x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-            b"test message",
-        );
+        // Create mock signature data for testing
+        let _signature_g1_bytes = x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let _message = b"test message";
 
         let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
             &counter,

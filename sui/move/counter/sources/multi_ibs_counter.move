@@ -93,13 +93,6 @@ public struct AggregatedPublicKey has key {
     included_key_server_ids: vector<ID>,
 }
 
-/// Single aggregated BLS signature from multiple key servers
-public struct AggregatedSignature has drop {
-    /// Aggregated BLS signature in G1 (48 bytes compressed)
-    signature_g1: vector<u8>,
-    /// Original message that was signed
-    message: vector<u8>,
-}
 
 // === Public Functions ===
 
@@ -109,8 +102,8 @@ public fun share(key_server_ids: vector<ID>, threshold: u64, ctx: &mut TxContext
     assert_all_unique(&key_server_ids);
 
     let n = key_server_ids.length();
-    assert!(n > 0, EInvalidThreshold);
-    assert!(threshold > 0 && threshold <= n, EInvalidThreshold);
+    assert!(threshold > 0, EInvalidThreshold);
+    assert!(threshold <= n, EInvalidThreshold);
 
     let config = MultiIBSConfig {
         key_server_ids,
@@ -131,7 +124,8 @@ public fun share(key_server_ids: vector<ID>, threshold: u64, ctx: &mut TxContext
 public fun verify_and_create_proof(
     counter: &MultiIBSCounter,
     aggregated_key: &AggregatedPublicKey,
-    aggregated_signature: AggregatedSignature,
+    signature_g1_bytes: vector<u8>,
+    message: vector<u8>,
     ctx: &mut TxContext,
 ): MultiIBSProof {
     // Check threshold requirement using authenticated key server count
@@ -140,8 +134,8 @@ public fun verify_and_create_proof(
     // Verify the aggregated signature against authenticated aggregated key
     assert!(
         verify_bls_signature(
-            &aggregated_signature.signature_g1,
-            &aggregated_signature.message,
+            &signature_g1_bytes,
+            &message,
             aggregated_key,
         ),
         ESignatureVerificationFailed,
@@ -308,16 +302,6 @@ public fun test_destroy_proof(proof: MultiIBSProof) {
 
 // === Test Helper Functions ===
 
-#[test_only]
-public fun test_create_aggregated_signature(
-    signature_g1: vector<u8>,
-    message: vector<u8>,
-): AggregatedSignature {
-    AggregatedSignature {
-        signature_g1,
-        message,
-    }
-}
 
 #[test_only]
 public fun test_create_counter(

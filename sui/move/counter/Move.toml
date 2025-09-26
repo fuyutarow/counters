@@ -3,18 +3,10 @@ name = "Counter"
 version = "0.0.1"
 edition = "2024.beta"
 
-[environments]
-
-[environments.testnet]
-chain-id = "4c78adac"
-
-
 [dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet", override = true }
-seal = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "seal-v0.5.11" }
+# seal = { published-at = "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50" }
+seal = { local = "../../../MYSTENLABS/seal/move/seal" }
+# seal = { local = "../../../MYSTENLABS/seal/move/seal", addr_subst = { seal = "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50" } }
 
 [addresses]
 counter = "0x0"
-
-[dep-replacements]
-testnet.seal = { published-at = "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50" }
