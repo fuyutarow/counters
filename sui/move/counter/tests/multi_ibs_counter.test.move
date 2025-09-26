@@ -26,7 +26,7 @@ fun test_share_counter() {
 
     next_tx(&mut scenario, ADMIN);
     {
-        multi_ibs_counter::create_and_share(
+        multi_ibs_counter::share(
             key_server_ids,
             threshold,
             ctx(&mut scenario),
@@ -59,14 +59,13 @@ fun test_basic_verification() {
     {
         let counter = ts::take_shared<MultiIBSCounter>(&scenario);
 
-        // Create aggregated signature with sufficient contributors
+        // Create aggregated signature
         let _aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
             x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // dummy signature
             b"test message",
-            2, // contributor count meets threshold
         );
 
-        let aggregated_key = multi_ibs_counter::create_aggregated_public_key(
+        let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
             &counter,
             ctx(&mut scenario),
         );
@@ -91,14 +90,13 @@ fun test_insufficient_signatures() {
     {
         let counter = ts::take_shared<MultiIBSCounter>(&scenario);
 
-        // Create aggregated signature with only 1 contributor (threshold is 2)
+        // Create aggregated signature (aggregated key will have 0 key servers, threshold is 2)
         let aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
             x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
             b"test message",
-            1, // Only 1 contributor, but threshold is 2
         );
 
-        let aggregated_key = multi_ibs_counter::create_aggregated_public_key(
+        let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
             &counter,
             ctx(&mut scenario),
         );
@@ -119,45 +117,6 @@ fun test_insufficient_signatures() {
     ts::end(scenario);
 }
 
-/// Test contributor count mismatch (should fail when counts don't match)
-#[test]
-#[expected_failure(abort_code = multi_ibs_counter::EContributorCountMismatch)]
-fun test_contributor_count_mismatch() {
-    let mut scenario = ts::begin(ADMIN);
-
-    setup_config_and_counter(&mut scenario);
-
-    next_tx(&mut scenario, USER);
-    {
-        let counter = ts::take_shared<MultiIBSCounter>(&scenario);
-
-        // Create aggregated signature claiming 3 contributors
-        let aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
-            x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-            b"test message",
-            3, // Claims 3 contributors
-        );
-
-        // But aggregated key has 0 key servers added
-        let aggregated_key = multi_ibs_counter::create_aggregated_public_key(
-            &counter,
-            ctx(&mut scenario),
-        );
-
-        let _proof = multi_ibs_counter::verify_and_create_proof(
-            &counter,
-            &aggregated_key,
-            aggregated_sig,
-            ctx(&mut scenario),
-        );
-
-        ts::return_shared(counter);
-        multi_ibs_counter::destroy_aggregated_public_key(aggregated_key);
-        multi_ibs_counter::test_destroy_proof(_proof);
-    };
-
-    ts::end(scenario);
-}
 
 /// Test successful counter increment with mock proof
 /// Note: This test uses mock data as we don't have actual Key Server objects
@@ -176,10 +135,9 @@ fun test_counter_increment_with_mock_proof() {
         let _aggregated_sig = multi_ibs_counter::test_create_aggregated_signature(
             x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
             b"test message",
-            2, // 2 contributors meeting threshold
         );
 
-        let aggregated_key = multi_ibs_counter::create_aggregated_public_key(
+        let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
             &counter,
             ctx(&mut scenario),
         );
@@ -211,7 +169,7 @@ fun setup_config_and_counter(scenario: &mut Scenario) {
             object::id_from_address(@0x3333),
         ];
 
-        multi_ibs_counter::create_and_share(
+        multi_ibs_counter::share(
             key_server_ids,
             2, // 2-of-3 threshold
             ctx(scenario),

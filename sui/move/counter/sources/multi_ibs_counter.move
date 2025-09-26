@@ -42,9 +42,6 @@ const EInvalidThreshold: vector<u8> = b"Invalid threshold: must be between 1 and
 const EInsufficientSignatures: vector<u8> = b"Contributor count below required threshold";
 
 #[error]
-const EContributorCountMismatch: vector<u8> = b"Signature and key contributor counts do not match";
-
-#[error]
 const EDuplicateKeyServer: vector<u8> = b"Duplicate key server detected";
 
 #[error]
@@ -102,14 +99,12 @@ public struct AggregatedSignature has drop {
     signature_g1: vector<u8>,
     /// Original message that was signed
     message: vector<u8>,
-    /// Number of key servers that contributed to this aggregation
-    contributor_count: u64,
 }
 
 // === Public Functions ===
 
 /// Create and share Multi-IBS counter with embedded configuration
-public fun create_and_share(key_server_ids: vector<ID>, threshold: u64, ctx: &mut TxContext) {
+public fun share(key_server_ids: vector<ID>, threshold: u64, ctx: &mut TxContext) {
     // Check for duplicate key server IDs
     assert_all_unique(&key_server_ids);
 
@@ -139,15 +134,10 @@ public fun verify_and_create_proof(
     aggregated_signature: AggregatedSignature,
     ctx: &mut TxContext,
 ): MultiIBSProof {
-    let contributor_count = aggregated_signature.contributor_count;
+    // Check threshold requirement using authenticated key server count
+    assert!(aggregated_key.key_server_count >= counter.config.threshold, EInsufficientSignatures);
 
-    // Check threshold requirement
-    assert!(contributor_count >= counter.config.threshold, EInsufficientSignatures);
-
-    // Check contributor count matches aggregated key
-    assert!(contributor_count == aggregated_key.key_server_count, EContributorCountMismatch);
-
-    // Verify the aggregated signature
+    // Verify the aggregated signature against authenticated aggregated key
     assert!(
         verify_bls_signature(
             &aggregated_signature.signature_g1,
@@ -160,7 +150,7 @@ public fun verify_and_create_proof(
     MultiIBSProof {
         id: object::new(ctx),
         counter_id: object::id(counter),
-        verified_signer_count: contributor_count,
+        verified_signer_count: aggregated_key.key_server_count,
     }
 }
 
@@ -175,7 +165,7 @@ public fun increment(counter: &mut MultiIBSCounter, proof: MultiIBSProof) {
 }
 
 /// Creates a new aggregated public key associated with a counter
-public fun create_aggregated_public_key(
+public fun new_aggregated_public_key(
     counter: &MultiIBSCounter,
     ctx: &mut TxContext,
 ): AggregatedPublicKey {
@@ -321,12 +311,10 @@ public fun test_destroy_proof(proof: MultiIBSProof) {
 public fun test_create_aggregated_signature(
     signature_g1: vector<u8>,
     message: vector<u8>,
-    contributor_count: u64,
 ): AggregatedSignature {
     AggregatedSignature {
         signature_g1,
         message,
-        contributor_count,
     }
 }
 
