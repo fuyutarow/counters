@@ -117,7 +117,6 @@ fun test_insufficient_signatures() {
     ts::end(scenario);
 }
 
-
 /// Test successful counter increment with mock proof
 /// Note: This test uses mock data as we don't have actual Key Server objects
 /// In a real scenario, the signature verification would happen with actual BLS signatures

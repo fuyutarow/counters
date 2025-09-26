@@ -164,6 +164,7 @@ public fun increment(counter: &mut MultiIBSCounter, proof: MultiIBSProof) {
     object::delete(id); // Consume proof to prevent replay
 }
 
+
 /// Creates a new aggregated public key associated with a counter
 public fun new_aggregated_public_key(
     counter: &MultiIBSCounter,
@@ -341,4 +342,32 @@ public fun test_destroy_counter(counter: MultiIBSCounter) {
     let MultiIBSCounter { id, value: _, config } = counter;
     let MultiIBSConfig { key_server_ids: _, threshold: _ } = config;
     object::delete(id);
+}
+
+/// Test helper: Create mock Key Server for testing
+/// This bypasses the Seal integration and creates a minimal object for testing PTB flow
+#[test_only]
+public fun test_create_mock_key_server(ctx: &mut TxContext): ID {
+    // Create a simple object that can be used as a Key Server placeholder
+    let id = object::new(ctx);
+    let object_id = object::uid_to_inner(&id);
+
+    // Delete the UID since we just need the ID
+    object::delete(id);
+
+    object_id
+}
+
+/// Test helper: Create proof without signature verification
+#[test_only]
+public fun test_create_proof(
+    counter: &MultiIBSCounter,
+    verified_signer_count: u64,
+    ctx: &mut TxContext,
+): MultiIBSProof {
+    MultiIBSProof {
+        id: object::new(ctx),
+        counter_id: object::id(counter),
+        verified_signer_count,
+    }
 }
