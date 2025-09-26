@@ -13,7 +13,8 @@ gas_budget = "100000000"
 
 [tasks.install-cli]
 run = '''
-suiup install sui --nightly=sui-pkg-alt -y
+suiup install sui
+# suiup install sui --nightly=sui-pkg-alt -y
 '''
 
 

@@ -84,7 +84,13 @@
       "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/move/seal/sources/**)",
       "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/sui/crates/sui-framework/docs/sui/**)",
       "Bash(bun:*)",
-      "Bash(sui client:*)"
+      "Bash(sui client:*)",
+      "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/docs/**)",
+      "Bash(xargs rg:*)",
+      "Read(//home/fuyu/MYSTENLABS/seal/**)",
+      "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/crates/crypto/src/**)",
+      "Bash(node:*)",
+      "Bash(tsx scripts/multi-ibs-with-seal.ts:*)"
     ],
     "deny": [],
     "ask": []
