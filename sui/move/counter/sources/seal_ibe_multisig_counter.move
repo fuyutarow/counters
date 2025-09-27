@@ -1,109 +1,118 @@
-/// Seal Shard Counter with BLS multi-signatures (same message, PoP-required)
+/// Seal IBE Multi-signature Counter with SEAL derived keys
 ///
-/// This module protects a counter using **BLS multi-signatures on the same message**
+/// This module protects a counter using **SEAL IBE-derived keys as signatures**
 /// with public-key aggregation for gas efficiency. Threshold is enforced as a **policy**
 /// (t-of-n verified signers), not as a cryptographic threshold scheme.
 ///
 /// Key features:
-/// - Store Seal Shard public keys directly (PoP checked off-chain on registration)
-/// - Verify an aggregated G1 signature against an aggregated G2 public key
-///   with only **2 pairings** regardless of signer count
-/// - **t-of-n policy**: require at least `threshold` distinct registered shards
+/// - Store SEAL IBE public keys directly (PoP checked off-chain on registration)
+/// - Verify aggregated derived signatures against aggregated public keys
+///   using **pairing equations** instead of standard BLS verification
+/// - **t-of-n policy**: require at least `threshold` distinct registered signers
 ///
 /// Flow:
-/// 1. Create `BlsMultisigConfig` with registered shard public keys (G2) and threshold
-/// 2. Share `BlsMultisigCounter` linked to the config
-/// 3. Off-chain: collect each shard's **BLS signature on the same message**
-/// 4. Off-chain: aggregate G1 signatures and aggregate the corresponding G2 public keys
-/// 5. On-chain: verify aggregated signature vs aggregated public key; mint one-time proof
+/// 1. Create `SealIbeMultisigConfig` with registered public keys (G2) and threshold
+/// 2. Share `SealIbeMultisigCounter` linked to the config
+/// 3. Off-chain: each participant derives keys for the same message using SEAL IBE
+/// 4. Off-chain: aggregate derived signatures and aggregate the corresponding public keys
+/// 5. On-chain: verify using pairing equation e(σ, g₂) = e(H₁(FullID), Σmpk_i)
 /// 6. Use the proof to increment the counter
 ///
 /// Message definition (must match signing side exactly):
-///   FullID := package_id || counter_id || signer_address || (DST_BLS_MSG_DOMAIN || message)
-///   H1_input := DST_HASH_TO_G1_SEAL_ID || FullID
+///   FullID := package_id || counter_id || signer_address || (DST_SEAL_MSG_DOMAIN || message)
+///   H1_input := DST_SEAL_IBE_ID || FullID
 ///   msg_G1 := hash_to_g1(H1_input)
 ///
 /// Security notes:
 /// - Requires **Proof of Possession (PoP)** for each stored public key to prevent rogue-key attacks
-/// - Enforces uniqueness and membership of contributing shards
+/// - Uses SEAL IBE-derived signatures, NOT standard BLS signatures
+/// - Enforces uniqueness and membership of contributing signers
 
-module counter::bls_multisig_counter;
+module counter::seal_ibe_multisig_counter;
 
 use std::{bcs, type_name};
 use sui::{
     address,
-    bls12381::{bls12381_min_sig_verify, G2, g2_from_bytes, g2_add, g2_identity},
+    bls12381::{
+        g1_from_bytes,
+        g2_from_bytes,
+        g2_add,
+        g2_identity,
+        g2_generator,
+        hash_to_g1,
+        pairing,
+        G2
+    },
     group_ops::{Element, bytes},
     hex,
     table::{Table, new}
 };
 
 // === Constants ===
-const DST_BLS_MSG_DOMAIN: vector<u8> = b"SUI-MULTI-IBS-V1";
+const DST_SEAL_MSG_DOMAIN: vector<u8> = b"SUI-SEAL-IBE-V1";
+const DST_SEAL_IBE_ID: vector<u8> = b"SUI-SEAL-IBE-BLS12381-00";
 
 // === Test Constants ===
-#[test_only]
-const DST_HASH_TO_G1_SEAL_ID: vector<u8> = b"SUI-SEAL-IBE-BLS12381-00";
 
 // === Errors ===
 #[error]
 const EInvalidThreshold: vector<u8> =
-    b"Invalid threshold policy: must be between 1 and seal shard count";
+    b"Invalid threshold policy: must be between 1 and signer count";
 
 #[error]
 const EInsufficientSignatures: vector<u8> = b"Insufficient signers for threshold policy";
 
 #[error]
-const EDuplicateSealShard: vector<u8> = b"Duplicate seal shard detected";
+const EDuplicateSigner: vector<u8> = b"Duplicate signer detected";
 
 #[error]
-const ESealShardNotRegistered: vector<u8> = b"Seal shard not registered in counter configuration";
+const ESignerNotRegistered: vector<u8> = b"Signer not registered in counter configuration";
 
 #[error]
-const ESignatureVerificationFailed: vector<u8> = b"BLS signature verification failed";
+const ESignatureVerificationFailed: vector<u8> = b"SEAL IBE signature verification failed";
 
 #[error]
 const ECounterMismatch: vector<u8> = b"Counter ID mismatch";
 
 #[error]
-const ESealShardAlreadyIncluded: vector<u8> = b"Seal shard already included in aggregation";
+const ESignerAlreadyIncluded: vector<u8> = b"Signer already included in aggregation";
 
 #[error]
 const EInvalidID: vector<u8> =
     b"Invalid ID: does not match expected counter_id || signer_address format";
 
 #[error]
-const ELengthMismatch: vector<u8> = b"Seal shard IDs and public keys vectors must have same length";
+const ELengthMismatch: vector<u8> = b"Signer IDs and public keys vectors must have same length";
 
 // === Structs ===
 
 /// Marker type for dynamic package ID extraction
 public struct PackageMarker has drop {}
 
-/// Configuration for BLS multi-signature verification
-/// Stores seal shard public keys in Table mapped by Key Server ID
-public struct BlsMultisigConfig has store {
-    seal_shard_table: Table<ID, Element<G2>>, // Key Server ID → Seal Shard Public Key
+/// Configuration for SEAL IBE multi-signature verification
+/// Stores SEAL IBE public keys in Table mapped by Signer ID
+public struct SealIbeMultisigConfig has store {
+    seal_ibe_table: Table<ID, Element<G2>>, // Signer ID → SEAL IBE Public Key
     threshold: u64, // Minimum required signatures (t)
 }
 
-/// Counter protected by BLS multi-signature aggregated signatures
-public struct BlsMultisigCounter has key {
+/// Counter protected by SEAL IBE multi-signature aggregated signatures
+public struct SealIbeMultisigCounter has key {
     id: UID,
     value: u64,
-    config: BlsMultisigConfig, // Embedded config for simplicity
+    config: SealIbeMultisigConfig, // Embedded config for simplicity
 }
 
 /// One-time proof token for counter operations
 /// Prevents replay attacks by consuming proof after use
-public struct BlsMultisigProof has key {
+public struct SealIbeMultisigProof has key {
     id: UID,
     counter_id: ID,
     verified_signer_count: u64, // Number of signatures verified
 }
 
-/// Aggregated public key for BLS multi-signature verification
-public struct BlsAggregatedPk has key {
+/// Aggregated public key for SEAL IBE multi-signature verification
+public struct SealIbeAggregatedPk has key {
     id: UID,
     /// Accumulated public key in G2 group (for internal operations)
     public_key_g2: Element<G2>,
@@ -111,45 +120,45 @@ public struct BlsAggregatedPk has key {
     public_key_bytes: vector<u8>,
     /// ID of the associated counter
     counter_id: ID,
-    /// Number of seal shards included in aggregation
-    seal_shard_count: u64,
-    /// Seal shard IDs already included (for duplicate prevention)
-    included_seal_shard_ids: vector<ID>,
+    /// Number of signers included in aggregation
+    signer_count: u64,
+    /// Signer IDs already included (for duplicate prevention)
+    included_signer_ids: vector<ID>,
 }
 
 // === Public Functions ===
 
-/// Create and share Seal Shard counter with embedded configuration
+/// Create and share SEAL IBE counter with embedded configuration
 public fun share(
-    seal_shard_ids: vector<ID>,
-    seal_shard_pubkeys: vector<vector<u8>>,
+    signer_ids: vector<ID>,
+    signer_pubkeys: vector<vector<u8>>,
     threshold: u64,
     ctx: &mut TxContext,
 ) {
     // Check input validation
-    assert!(seal_shard_ids.length() == seal_shard_pubkeys.length(), ELengthMismatch);
-    assert_all_unique(&seal_shard_ids);
+    assert!(signer_ids.length() == signer_pubkeys.length(), ELengthMismatch);
+    assert_all_unique(&signer_ids);
 
-    let n = seal_shard_ids.length();
+    let n = signer_ids.length();
     assert!(threshold > 0, EInvalidThreshold);
     assert!(threshold <= n, EInvalidThreshold);
 
     // Create table and populate with ID → public key mappings
-    let mut seal_shard_table = new<ID, Element<G2>>(ctx);
+    let mut seal_ibe_table = new<ID, Element<G2>>(ctx);
     let mut i = 0;
     while (i < n) {
-        let seal_shard_id = seal_shard_ids[i];
-        let seal_shard_pubkey_g2 = g2_from_bytes(&seal_shard_pubkeys[i]);
-        seal_shard_table.add(seal_shard_id, seal_shard_pubkey_g2);
+        let signer_id = signer_ids[i];
+        let signer_pubkey_g2 = g2_from_bytes(&signer_pubkeys[i]);
+        seal_ibe_table.add(signer_id, signer_pubkey_g2);
         i = i + 1;
     };
 
-    let config = BlsMultisigConfig {
-        seal_shard_table,
+    let config = SealIbeMultisigConfig {
+        seal_ibe_table,
         threshold,
     };
 
-    let counter = BlsMultisigCounter {
+    let counter = SealIbeMultisigCounter {
         id: object::new(ctx),
         value: 0,
         config,
@@ -159,20 +168,20 @@ public fun share(
 }
 
 /// Verify aggregated signature and create one-time proof token
-/// This is the core function that performs BLS multi-signature aggregation verification
+/// This is the core function that performs SEAL IBE multi-signature verification
 public fun verify_and_create_proof(
-    counter: &BlsMultisigCounter,
-    aggregated_key: &BlsAggregatedPk,
+    counter: &SealIbeMultisigCounter,
+    aggregated_key: &SealIbeAggregatedPk,
     signature_g1_bytes: vector<u8>,
     message: vector<u8>,
     ctx: &mut TxContext,
-): BlsMultisigProof {
-    // Check threshold requirement using authenticated seal shard count
-    assert!(aggregated_key.seal_shard_count >= counter.config.threshold, EInsufficientSignatures);
+): SealIbeMultisigProof {
+    // Check threshold requirement using authenticated signer count
+    assert!(aggregated_key.signer_count >= counter.config.threshold, EInsufficientSignatures);
 
     // Verify the aggregated signature against authenticated aggregated key
     assert!(
-        verify_bls_multisig(
+        verify_seal_ibe_multisig(
             &signature_g1_bytes,
             &message,
             aggregated_key,
@@ -181,16 +190,16 @@ public fun verify_and_create_proof(
         ESignatureVerificationFailed,
     );
 
-    BlsMultisigProof {
+    SealIbeMultisigProof {
         id: object::new(ctx),
         counter_id: object::id(counter),
-        verified_signer_count: aggregated_key.seal_shard_count,
+        verified_signer_count: aggregated_key.signer_count,
     }
 }
 
 /// Increment counter using proof token
-public fun increment(counter: &mut BlsMultisigCounter, proof: BlsMultisigProof) {
-    let BlsMultisigProof { id, counter_id, verified_signer_count: _ } = proof;
+public fun increment(counter: &mut SealIbeMultisigCounter, proof: SealIbeMultisigProof) {
+    let SealIbeMultisigProof { id, counter_id, verified_signer_count: _ } = proof;
 
     assert!(counter_id == object::id(counter), ECounterMismatch);
     counter.value = counter.value + 1;
@@ -198,50 +207,47 @@ public fun increment(counter: &mut BlsMultisigCounter, proof: BlsMultisigProof) 
     object::delete(id); // Consume proof to prevent replay
 }
 
-/// Creates a new aggregated seal shard key associated with a counter
-public fun new_bls_aggregated_pk(
-    counter: &BlsMultisigCounter,
+/// Creates a new aggregated SEAL IBE key associated with a counter
+public fun new_seal_ibe_aggregated_pk(
+    counter: &SealIbeMultisigCounter,
     ctx: &mut TxContext,
-): BlsAggregatedPk {
+): SealIbeAggregatedPk {
     let identity_g2 = g2_identity();
-    BlsAggregatedPk {
+    SealIbeAggregatedPk {
         id: object::new(ctx),
         public_key_g2: identity_g2,
         public_key_bytes: *bytes(&identity_g2),
         counter_id: object::id(counter),
-        seal_shard_count: 0,
-        included_seal_shard_ids: vector[],
+        signer_count: 0,
+        included_signer_ids: vector[],
     }
 }
 
-/// Add a seal shard's public key to the aggregated key
-public fun aggregate_seal_shard_pubkey(
-    counter: &BlsMultisigCounter,
-    aggregated_key: &mut BlsAggregatedPk,
-    seal_shard_id: ID,
+/// Add a signer's public key to the aggregated key
+public fun aggregate_signer_pubkey(
+    counter: &SealIbeMultisigCounter,
+    aggregated_key: &mut SealIbeAggregatedPk,
+    signer_id: ID,
 ) {
     // Counter ID verification
     assert!(object::id(counter) == aggregated_key.counter_id, ECounterMismatch);
 
-    // Check if seal shard ID is registered in counter config
-    assert!(counter.config.seal_shard_table.contains(seal_shard_id), ESealShardNotRegistered);
+    // Check if signer ID is registered in counter config
+    assert!(counter.config.seal_ibe_table.contains(signer_id), ESignerNotRegistered);
 
     // Check for duplicate addition
-    assert!(
-        !aggregated_key.included_seal_shard_ids.contains(&seal_shard_id),
-        ESealShardAlreadyIncluded,
-    );
+    assert!(!aggregated_key.included_signer_ids.contains(&signer_id), ESignerAlreadyIncluded);
 
     // Get the public key from table and add to aggregated key
-    let seal_shard_pubkey_g2 = &counter.config.seal_shard_table[seal_shard_id];
-    aggregated_key.public_key_g2 = g2_add(&aggregated_key.public_key_g2, seal_shard_pubkey_g2);
+    let signer_pubkey_g2 = &counter.config.seal_ibe_table[signer_id];
+    aggregated_key.public_key_g2 = g2_add(&aggregated_key.public_key_g2, signer_pubkey_g2);
 
-    // Update byte representation for standard BLS verification
+    // Update byte representation
     aggregated_key.public_key_bytes = *bytes(&aggregated_key.public_key_g2);
 
-    // Record this seal shard ID as included and increment count
-    aggregated_key.included_seal_shard_ids.push_back(seal_shard_id);
-    aggregated_key.seal_shard_count = aggregated_key.seal_shard_count + 1;
+    // Record this signer ID as included and increment count
+    aggregated_key.included_signer_ids.push_back(signer_id);
+    aggregated_key.signer_count = aggregated_key.signer_count + 1;
 }
 
 // === Private Functions ===
@@ -250,7 +256,7 @@ public fun aggregate_seal_shard_pubkey(
 fun assert_all_unique<T: drop + copy>(items: &vector<T>) {
     items.length().do!(|i| {
         let (found, j) = items.index_of(&items[i]);
-        assert!(found && i == j, EDuplicateSealShard);
+        assert!(found && i == j, EDuplicateSigner);
     });
 }
 
@@ -260,16 +266,15 @@ public fun get_package_id_bytes(): vector<u8> {
     bcs::to_bytes(&addr)
 }
 
-/// Verify a BLS multi-signature (same message) using standard Sui BLS verification.
-/// Uses FullID as the message for standard BLS signature verification:
-///   FullID = package_id || counter_id || signer_address || (DST_BLS_MSG_DOMAIN || message)
-///
-/// This replaces the custom pairing-based verification with the standard
-/// bls12381_min_sig_verify which uses DST: BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
-fun verify_bls_multisig(
+/// Verify a SEAL IBE multi-signature using pairing equations.
+/// Uses FullID to construct the hash-to-G1 input for verification:
+///   FullID = package_id || counter_id || signer_address || (DST_SEAL_MSG_DOMAIN || message)
+///   H1_input = DST_SEAL_IBE_ID || FullID
+///   Verification: e(σ, g₂) = e(H₁(FullID), aggregated_pk_g2)
+fun verify_seal_ibe_multisig(
     signature_g1_bytes: &vector<u8>,
     message: &vector<u8>,
-    aggregated_key: &BlsAggregatedPk,
+    aggregated_key: &SealIbeAggregatedPk,
     signer: address,
 ): bool {
     // Reconstruct FullID same as in seal_approve: counter_id || signer || domain || message
@@ -279,7 +284,7 @@ fun verify_bls_multisig(
 
     // Prepare message with domain separation (same as in seal_approve)
     let mut message_with_domain = vector[];
-    message_with_domain.append(DST_BLS_MSG_DOMAIN);
+    message_with_domain.append(DST_SEAL_MSG_DOMAIN);
     message_with_domain.append(*message);
 
     // Append domain + message to inner ID
@@ -291,69 +296,82 @@ fun verify_bls_multisig(
     let mut full_id = package_id_bytes;
     full_id.append(inner_id);
 
-    // Use standard BLS verification with FullID as message
-    // Standard DST: BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
-    // signature: 48 bytes (G1), public_key: 96 bytes (G2), message: FullID
-    bls12381_min_sig_verify(signature_g1_bytes, &aggregated_key.public_key_bytes, &full_id)
+    // Construct hash input for SEAL IBE: DST_SEAL_IBE_ID || FullID
+    let mut hash_input = DST_SEAL_IBE_ID;
+    hash_input.append(full_id);
+
+    // Verify using pairing equation: e(σ, g₂) = e(H₁(hash_input), aggregated_pk_g2)
+    let sigma = g1_from_bytes(signature_g1_bytes);
+    let g2_gen = g2_generator();
+    let h1_point = hash_to_g1(&hash_input);
+
+    // Left side: e(σ, g₂)
+    let left_pairing = pairing(&sigma, &g2_gen);
+
+    // Right side: e(H₁(hash_input), aggregated_pk_g2)
+    let right_pairing = pairing(&h1_point, &aggregated_key.public_key_g2);
+
+    // Check if pairings are equal
+    left_pairing == right_pairing
 }
 
 // === View Functions ===
 
-public fun value(self: &BlsMultisigCounter): u64 {
+public fun value(self: &SealIbeMultisigCounter): u64 {
     self.value
 }
 
-public fun threshold(self: &BlsMultisigCounter): u64 {
+public fun threshold(self: &SealIbeMultisigCounter): u64 {
     self.config.threshold
 }
 
-public fun seal_shard_count(self: &BlsMultisigCounter): u64 {
-    self.config.seal_shard_table.length()
+public fun signer_count(self: &SealIbeMultisigCounter): u64 {
+    self.config.seal_ibe_table.length()
 }
 
-public fun seal_shard_table(self: &BlsMultisigCounter): &Table<ID, Element<G2>> {
-    &self.config.seal_shard_table
+public fun seal_ibe_table(self: &SealIbeMultisigCounter): &Table<ID, Element<G2>> {
+    &self.config.seal_ibe_table
 }
 
-// === AggregatedSealShardKey View Functions ===
+// === SealIbeAggregatedPk View Functions ===
 
 /// Get the aggregated G2 public key
-public fun public_key_g2(self: &BlsAggregatedPk): &Element<G2> {
+public fun public_key_g2(self: &SealIbeAggregatedPk): &Element<G2> {
     &self.public_key_g2
 }
 
 /// Get the counter ID associated with this aggregated key
-public fun aggregated_key_counter_id(self: &BlsAggregatedPk): ID {
+public fun aggregated_key_counter_id(self: &SealIbeAggregatedPk): ID {
     self.counter_id
 }
 
-/// Get the seal shard IDs included in the aggregation
-public fun included_seal_shard_ids(self: &BlsAggregatedPk): &vector<ID> {
-    &self.included_seal_shard_ids
+/// Get the signer IDs included in the aggregation
+public fun included_signer_ids(self: &SealIbeAggregatedPk): &vector<ID> {
+    &self.included_signer_ids
 }
 
-/// Get the count of seal shards included in the aggregation
-public fun included_seal_shard_count(self: &BlsAggregatedPk): u64 {
-    self.included_seal_shard_ids.length()
+/// Get the count of signers included in the aggregation
+public fun included_signer_count(self: &SealIbeAggregatedPk): u64 {
+    self.included_signer_ids.length()
 }
 
-/// Destroy BlsAggregatedPk object
-public fun destroy_bls_aggregated_pk(key: BlsAggregatedPk) {
-    let BlsAggregatedPk {
+/// Destroy SealIbeAggregatedPk object
+public fun destroy_seal_ibe_aggregated_pk(key: SealIbeAggregatedPk) {
+    let SealIbeAggregatedPk {
         id,
         public_key_g2: _,
         public_key_bytes: _,
         counter_id: _,
-        seal_shard_count: _,
-        included_seal_shard_ids: _,
+        signer_count: _,
+        included_signer_ids: _,
     } = key;
     object::delete(id);
 }
 
-/// Destroy SealShardProof object (for testing only)
+/// Destroy SealIbeMultisigProof object (for testing only)
 #[test_only]
-public fun test_destroy_proof(proof: BlsMultisigProof) {
-    let BlsMultisigProof {
+public fun test_destroy_proof(proof: SealIbeMultisigProof) {
+    let SealIbeMultisigProof {
         id,
         counter_id: _,
         verified_signer_count: _,
@@ -363,11 +381,11 @@ public fun test_destroy_proof(proof: BlsMultisigProof) {
 
 // === Seal Integration Functions ===
 
-/// Seal approve function for Seal Shard counter access
+/// Seal approve function for SEAL IBE counter access
 /// InnerID structure: counter_id || signer_address || H(domain || message)
 entry fun seal_approve(
     id: vector<u8>,
-    counter: &BlsMultisigCounter,
+    counter: &SealIbeMultisigCounter,
     message: vector<u8>,
     _ctx: &TxContext,
 ) {
@@ -376,9 +394,9 @@ entry fun seal_approve(
     let signer_bytes = address::to_bytes(_ctx.sender());
     expected_inner_id.append(signer_bytes);
 
-    // Prepare message with domain separation matching BLS verification
+    // Prepare message with domain separation matching SEAL IBE verification
     let mut message_with_domain = vector[];
-    message_with_domain.append(DST_BLS_MSG_DOMAIN);
+    message_with_domain.append(DST_SEAL_MSG_DOMAIN);
     message_with_domain.append(message);
 
     // Include the raw message bytes instead of G1 hash
@@ -393,26 +411,26 @@ entry fun seal_approve(
 
 #[test_only]
 public fun test_create_counter(
-    seal_shard_ids: vector<ID>,
-    seal_shard_pubkey_bytes: vector<vector<u8>>,
+    signer_ids: vector<ID>,
+    signer_pubkey_bytes: vector<vector<u8>>,
     threshold: u64,
     ctx: &mut TxContext,
-): BlsMultisigCounter {
-    let mut seal_shard_table = new<ID, Element<G2>>(ctx);
+): SealIbeMultisigCounter {
+    let mut seal_ibe_table = new<ID, Element<G2>>(ctx);
     let mut i = 0;
-    while (i < seal_shard_ids.length()) {
-        let seal_shard_id = seal_shard_ids[i];
-        let seal_shard_pubkey_g2 = g2_from_bytes(&seal_shard_pubkey_bytes[i]);
-        seal_shard_table.add(seal_shard_id, seal_shard_pubkey_g2);
+    while (i < signer_ids.length()) {
+        let signer_id = signer_ids[i];
+        let signer_pubkey_g2 = g2_from_bytes(&signer_pubkey_bytes[i]);
+        seal_ibe_table.add(signer_id, signer_pubkey_g2);
         i = i + 1;
     };
 
-    let config = BlsMultisigConfig {
-        seal_shard_table,
+    let config = SealIbeMultisigConfig {
+        seal_ibe_table,
         threshold,
     };
 
-    BlsMultisigCounter {
+    SealIbeMultisigCounter {
         id: object::new(ctx),
         value: 0,
         config,
@@ -420,24 +438,24 @@ public fun test_create_counter(
 }
 
 #[test_only]
-public fun test_destroy_counter(counter: BlsMultisigCounter) {
-    let BlsMultisigCounter { id, value: _, config } = counter;
-    let BlsMultisigConfig { seal_shard_table, threshold: _ } = config;
+public fun test_destroy_counter(counter: SealIbeMultisigCounter) {
+    let SealIbeMultisigCounter { id, value: _, config } = counter;
+    let SealIbeMultisigConfig { seal_ibe_table, threshold: _ } = config;
 
     // For testing, we assume the table might not be empty
     // In practice, dropping the table will handle cleanup automatically
-    seal_shard_table.drop();
+    seal_ibe_table.drop();
     object::delete(id);
 }
 
 /// Test helper: Create proof without signature verification
 #[test_only]
 public fun test_create_proof(
-    counter: &BlsMultisigCounter,
+    counter: &SealIbeMultisigCounter,
     verified_signer_count: u64,
     ctx: &mut TxContext,
-): BlsMultisigProof {
-    BlsMultisigProof {
+): SealIbeMultisigProof {
+    SealIbeMultisigProof {
         id: object::new(ctx),
         counter_id: object::id(counter),
         verified_signer_count,
@@ -476,12 +494,12 @@ public fun test_debug_id_construction() {
 
     // Step 3: Prepare message with domain separation
     let mut message_with_domain = vector[];
-    message_with_domain.append(DST_BLS_MSG_DOMAIN);
+    message_with_domain.append(DST_SEAL_MSG_DOMAIN);
     message_with_domain.append(message);
 
     debug::print(&b"Step 3 - Message with domain:");
-    debug::print(&b"Domain separator: SUI-MULTI-IBS-V1");
-    debug::print(&hex::encode(DST_BLS_MSG_DOMAIN));
+    debug::print(&b"Domain separator: SUI-SEAL-IBE-V1");
+    debug::print(&hex::encode(DST_SEAL_MSG_DOMAIN));
     debug::print(&b"Message bytes:");
     debug::print(&hex::encode(message));
     debug::print(&b"Combined message with domain:");
@@ -510,11 +528,11 @@ public fun test_debug_id_construction() {
     debug::print(&hex::encode(full_id));
 
     // Step 7: Hash input for hash_to_g1
-    let mut ibe_hash_input = DST_HASH_TO_G1_SEAL_ID;
+    let mut ibe_hash_input = DST_SEAL_IBE_ID;
     ibe_hash_input.append(full_id);
     debug::print(&b"Step 7 - Hash input for hash_to_g1:");
     debug::print(&b"SEAL DST: SUI-SEAL-IBE-BLS12381-00");
-    debug::print(&hex::encode(DST_HASH_TO_G1_SEAL_ID));
+    debug::print(&hex::encode(DST_SEAL_IBE_ID));
     debug::print(&b"Hash input length (should be 148 bytes):");
     debug::print(&(ibe_hash_input.length() as u64));
     debug::print(&b"Hash input hex:");
