@@ -5,7 +5,7 @@
  * and completely eliminates mock usage in tests.
  */
 
-import { SealShardAggregator } from "../../scripts/seal-shard-with-seal.ts";
+import { SealMultiIBSAggregator } from "../../scripts/multi-ibs-with-seal.ts";
 
 // Cache for real public keys to avoid repeated network calls
 const publicKeyCache = new Map<string, Uint8Array>();
@@ -28,7 +28,7 @@ export async function getRealSealShardPublicKeys(
     if (!publicKey) {
       try {
         // Try to fetch from real Seal Key Server
-        const aggregator = new SealShardAggregator(network);
+        const aggregator = new SealMultiIBSAggregator(network);
         publicKey = await aggregator.getSealShardPublicKey(keyServerId);
         // Cache the successful result
         publicKeyCache.set(keyServerId, publicKey);
