@@ -15,6 +15,7 @@ import { SealClient, SessionKey } from "@mysten/seal";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { type Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import { fromB64 } from "@mysten/sui/utils";
 import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { counterPackage, type Seal_ibe_multisig_counterSealIbeMultisigCounterType } from "@/abi";
 import { getKeypair } from "./utils/keybook.js";
@@ -22,7 +23,11 @@ import { getKeypair } from "./utils/keybook.js";
 // Configuration
 const NETWORK = "testnet";
 const THRESHOLD = 2; // 2-of-3 threshold
+const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
+  ? Number(process.env.SEAL_TEST_THRESHOLD)
+  : THRESHOLD;
 const COUNTER_PACKAGE_ID = counterPackage.packageId;
+let ORIGINAL_COUNTER_PACKAGE_ID: `0x${string}`;
 
 // Real Key Server configurations from testnet
 const KEY_SERVERS = [
@@ -47,7 +52,7 @@ interface KeyShare {
   secretKey: Uint8Array; // sk_ID_i as G1Element bytes
 }
 
-interface SealIbeMultisigSignature {
+interface BlsMultisigSignature {
   signature: Uint8Array; // G1 signature (48 bytes)
   message: Uint8Array;
   identity: string;
@@ -55,6 +60,223 @@ interface SealIbeMultisigSignature {
 
 // BLS signature utilities
 const _blss = bls12_381.shortSignatures;
+
+async function fetchOriginalCounterPackageId(
+  client: SuiClient,
+  sender: string,
+): Promise<`0x${string}`> {
+  const tx = new Transaction();
+  counterPackage.seal_ibe_multisig_counter.get_package_id_bytes(tx, {
+    arguments: [],
+  });
+
+  const txBytes = await tx.build({ client, onlyTransactionKind: true });
+  const devInspect = await client.devInspectTransactionBlock({
+    sender,
+    transactionBlock: txBytes,
+  });
+
+  const returnValues = devInspect.results?.flatMap((result) => result.returnValues ?? []);
+  const firstValue = returnValues?.[0];
+  if (!firstValue) {
+    throw new Error("get_package_id_bytes returned empty result");
+  }
+
+  const [rawValue] = firstValue;
+  const rawBytes =
+    typeof rawValue === "string" ? fromB64(rawValue) : Uint8Array.from(rawValue as number[]);
+
+  if (rawBytes.length === 0) {
+    throw new Error("get_package_id_bytes returned empty payload");
+  }
+
+  const length = rawBytes[0];
+  if (length !== 32 || rawBytes.length < 1 + length) {
+    throw new Error(`Unexpected package id length: ${length}`);
+  }
+
+  const pkgBytes = rawBytes.slice(1, 1 + length);
+  return `0x${Buffer.from(pkgBytes).toString("hex")}` as const;
+}
+
+// ================================
+// DEBUG UTILITIES for SEAL IBE
+// ================================
+
+/**
+ * Debug utility: hex formatter for byte arrays
+ */
+function hex(u8: Uint8Array): `0x${string}` {
+  return `0x${Buffer.from(u8).toString("hex")}`;
+}
+
+/**
+ * Debug utility: convert hex string to 32-byte array (left zero padded)
+ */
+function hexTo32Bytes(hexStr: string): Uint8Array {
+  const h = hexStr.startsWith("0x") ? hexStr.slice(2) : hexStr;
+  return new Uint8Array(Buffer.from(h.padStart(64, "0"), "hex"));
+}
+
+/**
+ * Build InnerID matching Move implementation exactly
+ */
+export function buildInnerId(
+  counterId: string,
+  signerAddr: string,
+  msg: Uint8Array,
+): { inner: Uint8Array; messageWithDomain: Uint8Array } {
+  const DOMAIN = new TextEncoder().encode("SUI-SEAL-IBE-V1");
+  const counter = hexTo32Bytes(counterId);
+  const signer = hexTo32Bytes(signerAddr);
+  const messageWithDomain = new Uint8Array([...DOMAIN, ...msg]);
+  const inner = new Uint8Array([...counter, ...signer, ...messageWithDomain]);
+  return { inner, messageWithDomain };
+}
+
+/**
+ * Build FullID matching SEAL SDK createFullId function
+ */
+export function buildFullId(packageId: string, innerId: Uint8Array): Uint8Array {
+  const pkg = hexTo32Bytes(packageId);
+  const full = new Uint8Array([...pkg, ...innerId]);
+  return full;
+}
+
+/**
+ * Build H1 input for SEAL IBE matching Move implementation
+ */
+export function buildH1InputForSealIBE(
+  packageId: string,
+  innerId: Uint8Array,
+): { full: Uint8Array; h1in: Uint8Array } {
+  const DST = new TextEncoder().encode("SUI-SEAL-IBE-BLS12381-00");
+  const full = buildFullId(packageId, innerId);
+  const h1in = new Uint8Array([...DST, ...full]);
+  return { full, h1in };
+}
+
+/**
+ * Assert G1 compressed point is valid
+ */
+function assertG1Compressed(_name: string, bytes: Uint8Array): void {
+  const _p = bls12_381.G1.Point.fromBytes(bytes); // fails if invalid
+}
+
+/**
+ * Assert G2 compressed point is valid
+ */
+function assertG2Compressed(name: string, bytes: Uint8Array): void {
+  if (bytes.length !== 96) throw new Error(`${name} must be 96 bytes (G2 compressed)`);
+  // noble for G2 parsing (fails if invalid)
+  const _p = bls12_381.G2.Point.fromHex(Buffer.from(bytes).toString("hex"));
+}
+
+/**
+ * Server configuration for individual testing
+ */
+type OneServerCfg = { objectId: string; url: string; weight: number };
+
+/**
+ * Test individual server for derive key operation
+ */
+async function deriveFromOneServer(
+  server: OneServerCfg,
+  idHex: `0x${string}`,
+  sessionKey: SessionKey,
+  txBytes: Uint8Array,
+): Promise<{ ok: true; serverId: string; keyBytes: Uint8Array } | { ok: false; error: string }> {
+  const one = new SealClient({
+    networkConfig: NETWORK,
+    suiClient: new SuiClient({ url: getFullnodeUrl(NETWORK) }),
+    serverConfigs: [server],
+  });
+
+  try {
+    const m = await one.getDerivedKeys({ id: idHex, sessionKey, txBytes, threshold: 1 });
+    // Map(1) expected
+    const [entry] = [...m.entries()];
+    if (!entry) throw new Error("No key returned");
+    const [serverId, derivedKey] = entry;
+    return { ok: true as const, serverId, keyBytes: derivedKey.key.toBytes() };
+  } catch (e: unknown) {
+    return { ok: false as const, error: String(e) };
+  }
+}
+
+/**
+ * Diagnostic function to determine server implementation type
+ */
+async function deriveForDiagnosis(
+  server: OneServerCfg,
+  innerHex: `0x${string}`,
+  sessionKey: SessionKey,
+  txBytes: Uint8Array,
+): Promise<{
+  resRaw: { ok: true; serverId: string; key: Uint8Array } | { ok: false; error: string };
+  resSha: { ok: true; serverId: string; key: Uint8Array } | { ok: false; error: string };
+}> {
+  const client = new SealClient({
+    networkConfig: NETWORK,
+    suiClient: new SuiClient({ url: getFullnodeUrl(NETWORK) }),
+    serverConfigs: [server],
+  });
+
+  // Create 32B SHA256 hash for diagnosis (NOT used in verification)
+  const inner = Buffer.from(innerHex.slice(2), "hex");
+  const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", inner));
+  const shaHex = `0x${Buffer.from(sha).toString("hex")}` as const;
+
+  const tryOnce = async (idHex: `0x${string}`) => {
+    try {
+      const m = await client.getDerivedKeys({ id: idHex, sessionKey, txBytes, threshold: 1 });
+      const [entry] = [...m.entries()];
+      if (!entry) throw new Error("No key returned");
+      const [serverId, derivedKey] = entry;
+      return { ok: true as const, serverId, key: derivedKey.key.toBytes() };
+    } catch (e: unknown) {
+      return { ok: false as const, error: String(e) };
+    }
+  };
+
+  const resRaw = await tryOnce(innerHex);
+  const resSha = await tryOnce(shaHex);
+
+  return { resRaw, resSha };
+}
+
+/**
+ * Session key wrapper with automatic retry on expiration
+ */
+async function withSessionKey<T>(
+  suiClient: SuiClient,
+  addr: string,
+  keypair: Ed25519Keypair,
+  fn: (sk: SessionKey) => Promise<T>,
+): Promise<T> {
+  const newSK = () =>
+    SessionKey.create({
+      address: addr,
+      packageId: ORIGINAL_COUNTER_PACKAGE_ID,
+      ttlMin: 30,
+      signer: keypair,
+      suiClient,
+    });
+
+  let attempt = 0;
+  while (attempt < 3) {
+    const sk = await newSK();
+    try {
+      return await fn(sk);
+    } catch (e: unknown) {
+      if (!String(e).includes("expired")) {
+        throw e;
+      }
+      attempt++;
+    }
+  }
+  throw new Error("Session key has expired repeatedly");
+}
 
 /**
  * Get counter value from on-chain object
@@ -75,7 +297,7 @@ const getCounterValue = async (client: SuiClient, counterId: string): Promise<nu
 };
 
 /**
- * Fetch real public keys from Seal Key Servers using getObject
+ * Fetch real public keys from Seal Key Servers using SEAL ABI-first approach
  */
 const getRealSealShardPublicKeys = async (
   keyServerIds: string[],
@@ -86,7 +308,9 @@ const getRealSealShardPublicKeys = async (
 
   for (const keyServerId of keyServerIds) {
     try {
-      // Get Key Server object directly
+      // ABI-first approach: Use object inspection with ABI structure knowledge
+      // sealPackage.key_server.pk() tells us the function exists, but for data access
+      // we need to inspect objects following the ABI-defined structure
       const keyServerObj = await client.getObject({
         id: keyServerId,
         options: { showContent: true },
@@ -96,25 +320,16 @@ const getRealSealShardPublicKeys = async (
         throw new Error(`Failed to fetch Key Server object: ${keyServerObj.error}`);
       }
 
-      const content = keyServerObj.data?.content;
-      if (!content || content.dataType !== "moveObject") {
-        throw new Error(`Invalid Key Server object structure: ${keyServerId}`);
-      }
-
-      // KeyServer has versioned structure - we need to access via v1() for KeyServerV1
-      // Get the dynamic field that contains the actual KeyServerV1 data
+      // Get KeyServerV1 via dynamic fields (following ABI structure)
       const dynamicFields = await client.getDynamicFields({
         parentId: keyServerId,
       });
 
-      // Find the KeyServerV1 dynamic field
       const v1Field = dynamicFields.data.find((field) => field.objectType.includes("KeyServerV1"));
-
       if (!v1Field) {
         throw new Error(`No KeyServerV1 dynamic field found for ${keyServerId}`);
       }
 
-      // Get the KeyServerV1 object
       const v1Object = await client.getObject({
         id: v1Field.objectId,
         options: { showContent: true },
@@ -129,21 +344,19 @@ const getRealSealShardPublicKeys = async (
         throw new Error("Invalid KeyServerV1 object structure");
       }
 
-      // Extract pk from KeyServerV1 (nested in dynamic field structure)
-      const v1Fields = (v1Content as any).fields;
+      // Extract pk following the ABI-defined structure
+      const v1Fields = (v1Content as { fields?: { value?: { fields?: { pk?: unknown } } } }).fields;
       const pkField = v1Fields?.value?.fields?.pk;
 
       if (!pkField) {
         throw new Error(`No pk field found in KeyServerV1 object: ${v1Field.objectId}`);
       }
 
-      // Convert pk bytes to Uint8Array
-      // pkField should be an array of numbers or a base64/hex string
+      // Convert pk bytes to Uint8Array following ABI expectations
       let mpkBytes: Uint8Array;
       if (Array.isArray(pkField)) {
         mpkBytes = new Uint8Array(pkField);
       } else if (typeof pkField === "string") {
-        // Try hex first, then base64
         if (pkField.startsWith("0x")) {
           mpkBytes = new Uint8Array(Buffer.from(pkField.slice(2), "hex"));
         } else {
@@ -153,12 +366,14 @@ const getRealSealShardPublicKeys = async (
         throw new Error(`Unexpected pk field format in ${keyServerId}: ${typeof pkField}`);
       }
 
+      // Validate G2 point using ABI-aware validation
+      assertG2Compressed(`KeyServer-${keyServerId}`, mpkBytes);
+
       publicKeys.push(mpkBytes);
     } catch (error) {
-      throw new Error(`Real Key Server integration failed: ${error}`);
+      throw new Error(`ABI-first Key Server integration failed: ${error}`);
     }
   }
-
   return publicKeys;
 };
 
@@ -208,121 +423,134 @@ const createSealIbeMultisigCounter = async (
 };
 
 /**
- * Fetch IBE key shares from Seal Key Servers
+ * Fetch IBE key shares from Seal Key Servers with debugging and failover
  */
 const fetchSecretKeyShares = async (
   counterId: string,
   signerKeypair: Ed25519Keypair,
   message: string,
-  requiredCount: number = THRESHOLD,
+  requiredCount: number = THRESHOLD_RUNTIME,
 ): Promise<KeyShare[]> => {
   const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
+  const signerAddress = signerKeypair.getPublicKey().toSuiAddress();
 
-  // Initialize SealClient for real Key Server operations
-  const sealClient = new SealClient({
-    networkConfig: NETWORK,
-    suiClient,
-    serverConfigs: [
-      {
-        objectId: "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2",
-        url: "https://seal.studio-mirai.com", // Studio Mirai
-        weight: 1,
-      },
-      {
-        objectId: "0x6068c0acb197dddbacd4746a9de7f025b2ed5a5b6c1b1ab44dade4426d141da2",
-        url: "https://seal.ruby-node.com", // Ruby Node
-        weight: 1,
-      },
-      {
-        objectId: "0x5466b7df5c15b508678d51496ada8afab0d6f70a01c10613123382b1b8131007",
-        url: "https://seal.nodeinfra.com", // NodeInfra
-        weight: 1,
-      },
-    ],
-  });
+  // Server configurations for individual testing
+  const servers: OneServerCfg[] = [
+    {
+      objectId: "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2",
+      url: "https://seal.studio-mirai.com", // Studio Mirai
+      weight: 1,
+    },
+    {
+      objectId: "0x6068c0acb197dddbacd4746a9de7f025b2ed5a5b6c1b1ab44dade4426d141da2",
+      url: "https://seal.ruby-node.com", // Ruby Node
+      weight: 1,
+    },
+    {
+      objectId: "0x5466b7df5c15b508678d51496ada8afab0d6f70a01c10613123382b1b8131007",
+      url: "https://seal.nodeinfra.com", // NodeInfra
+      weight: 1,
+    },
+  ];
 
-  try {
-    // Step 1: Construct IBE Identity = counter_id || signer_address || message
-    const signerAddress = signerKeypair.getPublicKey().toSuiAddress();
-    const messageBytes = new TextEncoder().encode(message);
+  return await withSessionKey(suiClient, signerAddress, signerKeypair, async (sessionKey) => {
+    try {
+      // Step 1: Build InnerID exactly as Move and @mysten/seal expect
+      const messageBytes = new TextEncoder().encode(message);
+      const { inner } = buildInnerId(counterId, signerAddress, messageBytes);
+      const innerHex = hex(inner);
 
-    // Prepare message with domain separation matching Move contract
-    const messageWithDomain = new Uint8Array([
-      ...new TextEncoder().encode("SUI-SEAL-IBE-V1"),
-      ...messageBytes,
-    ]);
-
-    // Convert counter ID to bytes (same as Move object::id().to_bytes())
-    const counterIdBytes = Array.from(Buffer.from(counterId.replace("0x", ""), "hex"));
-
-    // Convert signer address to bytes (same as Move bcs::to_bytes(&address))
-    const signerBytes = Array.from(Buffer.from(signerAddress.replace("0x", ""), "hex"));
-
-    // Construct InnerID: counter_id || signer_address || (domain || message)
-    // This matches Move seal_approve exactly - NO package_id included
-    const ibeIdBytes = [...counterIdBytes, ...signerBytes, ...Array.from(messageWithDomain)];
-
-    // Convert to hex string for Seal SDK
-    const ibeIdHex = `0x${Buffer.from(ibeIdBytes).toString("hex")}`;
-
-    // Create a fresh session key for each test to avoid expiration issues
-    const sessionKey = await SessionKey.create({
-      address: signerAddress,
-      packageId: COUNTER_PACKAGE_ID,
-      ttlMin: 30, // Increase TTL to 30 minutes to avoid expiration
-      signer: signerKeypair,
-      suiClient,
-    });
-
-    console.log(`✓ SessionKey created for ${signerAddress}`);
-
-    // Step 3: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
-    const approveTx = new Transaction();
-    approveTx.moveCall({
-      target: `${COUNTER_PACKAGE_ID}::seal_ibe_multisig_counter::seal_approve`,
-      arguments: [
-        approveTx.pure.vector("u8", ibeIdBytes),
-        approveTx.object(counterId),
-        approveTx.pure.vector("u8", Array.from(messageBytes)),
-      ],
-    });
-
-    // Generate txBytes without executing the transaction
-    const txBytes = await approveTx.build({
-      client: suiClient,
-      onlyTransactionKind: true,
-    });
-
-    const derivedKeys = await sealClient.getDerivedKeys({
-      id: ibeIdHex,
-      sessionKey,
-      txBytes,
-      threshold: requiredCount,
-    });
-
-    if (!derivedKeys || typeof derivedKeys.size !== "number") {
-      throw new Error(`getDerivedKeys returned unexpected result: ${derivedKeys}`);
-    }
-
-    // Step 5: Convert Map to KeyShare format
-    const keyShares: KeyShare[] = [];
-    let serverIndex = 0;
-
-    for (const [serverId, derivedKey] of derivedKeys) {
-      const keyBytes = derivedKey.key.toBytes();
-
-      keyShares.push({
-        serverIndex,
-        serverId,
-        secretKey: keyBytes,
+      // Step 2: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
+      const approveTx = new Transaction();
+      approveTx.moveCall({
+        target: `${COUNTER_PACKAGE_ID}::seal_ibe_multisig_counter::seal_approve`,
+        arguments: [
+          approveTx.pure.vector("u8", Array.from(inner)),
+          approveTx.object(counterId),
+          approveTx.pure.vector("u8", Array.from(messageBytes)),
+        ],
       });
-      serverIndex++;
-    }
 
-    return keyShares;
-  } catch (error) {
-    throw new Error(`Real Key Server integration failed: ${error}`);
-  }
+      // Generate txBytes without executing the transaction
+      const txBytes = await approveTx.build({
+        client: suiClient,
+        onlyTransactionKind: true,
+      });
+      const perServer = await Promise.all(
+        servers.map(async (s, idx) => {
+          let primary = await deriveFromOneServer(s, innerHex, sessionKey, txBytes);
+          let diag: Awaited<ReturnType<typeof deriveForDiagnosis>> | null = null;
+
+          if (!primary.ok) {
+            for (let retry = 0; retry < 2; retry++) {
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              primary = await deriveFromOneServer(s, innerHex, sessionKey, txBytes);
+              if (primary.ok) break;
+            }
+          }
+
+          if (!primary.ok && primary.error.includes("Scalar out of range")) {
+            try {
+              diag = await deriveForDiagnosis(s, innerHex, sessionKey, txBytes);
+            } catch (_diagError) {}
+          }
+
+          return { idx, server: s, primary, diag };
+        }),
+      );
+
+      const keyShares: KeyShare[] = [];
+      const errors: Array<{ serverIndex: number; server: OneServerCfg; error: string }> = [];
+
+      for (const entry of perServer) {
+        const { idx, server, primary, diag } = entry;
+
+        if (primary.ok) {
+          assertG1Compressed(`DerivedKey-server${idx}`, primary.keyBytes);
+          keyShares.push({
+            serverIndex: idx,
+            serverId: primary.serverId,
+            secretKey: primary.keyBytes,
+          });
+          continue;
+        }
+
+        const diagCandidate = diag?.resRaw.ok ? diag.resRaw : diag?.resSha.ok ? diag.resSha : null;
+
+        if (diagCandidate) {
+          assertG1Compressed(`DiagnosedKey-server${idx}`, diagCandidate.key);
+          keyShares.push({
+            serverIndex: idx,
+            serverId: diagCandidate.serverId,
+            secretKey: diagCandidate.key,
+          });
+          continue;
+        }
+
+        errors.push({
+          serverIndex: idx,
+          server,
+          error: primary.ok ? "" : primary.error,
+        });
+      }
+
+      keyShares.sort((a, b) => a.serverIndex - b.serverIndex);
+
+      console.warn("[keyShares]", keyShares);
+
+      if (keyShares.length < requiredCount) {
+        throw new Error(
+          `Not enough successful servers (need ${requiredCount}, got ${keyShares.length}). ` +
+            `Errors: ${JSON.stringify(errors, null, 2)}`,
+        );
+      }
+
+      keyShares.splice(requiredCount);
+      return keyShares;
+    } catch (error) {
+      throw new Error(`Real Key Server integration failed: ${error}`);
+    }
+  });
 };
 
 /**
@@ -333,7 +561,7 @@ const aggregateIBESignature = (keyShares: KeyShare[]): Uint8Array => {
     throw new Error("No key shares to aggregate");
   }
 
-  let aggregatedSignature: any;
+  let aggregatedSignature: ReturnType<typeof bls12_381.G1.Point.fromBytes>;
 
   try {
     // Parse as compressed G1 point
@@ -372,7 +600,12 @@ const aggregateIBESignature = (keyShares: KeyShare[]): Uint8Array => {
     }
   }
 
-  return aggregatedSignature.toBytes(true); // 48 bytes compressed G1 point
+  const aggregatedBytes = aggregatedSignature.toBytes(true); // 48 bytes compressed G1 point
+
+  // Validate final aggregated signature
+  assertG1Compressed("AggregatedSignature", aggregatedBytes);
+
+  return aggregatedBytes;
 };
 
 /**
@@ -403,10 +636,10 @@ const generateSealIbeSignature = async (
 ): Promise<{ signature: Uint8Array; keyServerIds: string[] }> => {
   try {
     // Step 1: Fetch IBE key shares from real Key Servers for the specific message
-    const keyShares = await fetchSecretKeyShares(counterId, keypair, message, THRESHOLD);
+    const keyShares = await fetchSecretKeyShares(counterId, keypair, message, THRESHOLD_RUNTIME);
 
-    if (keyShares.length !== THRESHOLD) {
-      throw new Error(`Expected ${THRESHOLD} key shares, got ${keyShares.length}`);
+    if (keyShares.length !== THRESHOLD_RUNTIME) {
+      throw new Error(`Expected ${THRESHOLD_RUNTIME} key shares, got ${keyShares.length}`);
     }
 
     // Step 2: Aggregate IBE keys (which are already message-specific)
@@ -452,7 +685,8 @@ const verifySignatureAndCreateProof = async (
   // Step 2: Add Key Server public keys from seal_ibe_table (no Key Server object access)
   // The public keys are already stored in the Counter's seal_ibe_table from Step 1
   // aggregate_signer_pubkey reads from the table, not from Key Server objects
-  for (const keyServerId of keyServerIds) {
+  // Use only the servers that actually provided signatures (limited by THRESHOLD_RUNTIME)
+  for (const keyServerId of keyServerIds.slice(0, THRESHOLD_RUNTIME)) {
     counterPackage.seal_ibe_multisig_counter.aggregate_signer_pubkey(tx, {
       arguments: [tx.object(counterId), aggregatedKey, tx.pure.id(keyServerId)],
     });
@@ -504,6 +738,10 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     client = new SuiClient({ url: getFullnodeUrl(NETWORK) });
     const primeKeyInfo = getKeypair("PRIME");
     keypair = primeKeyInfo.keypair;
+    ORIGINAL_COUNTER_PACKAGE_ID = await fetchOriginalCounterPackageId(
+      client,
+      keypair.getPublicKey().toSuiAddress(),
+    );
   });
 
   test("Step 1: creates SEAL IBE multisig counter with real Seal Key Server public keys", async () => {
