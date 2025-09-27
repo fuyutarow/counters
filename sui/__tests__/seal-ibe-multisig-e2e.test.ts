@@ -23,6 +23,13 @@ import { getKeypair } from "./utils/keybook.js";
 // Configuration
 const NETWORK = "testnet";
 const THRESHOLD = 2; // 2-of-3 threshold
+
+class ExpiredSessionError extends Error {
+  constructor(msg = "Session key has expired") {
+    super(msg);
+    this.name = "ExpiredSessionError";
+  }
+}
 const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
   ? Number(process.env.SEAL_TEST_THRESHOLD)
   : THRESHOLD;
@@ -358,6 +365,11 @@ const SESSION_KEY_COOLDOWN_MS = 5 * 1000; // 5 second cooldown between session k
 const cachedSessionKeyMetaByAddress = new Map<string, SessionKeyMeta>();
 const lastSessionKeyCreationByAddress = new Map<string, number>();
 
+function clearSessionKeyCache() {
+  cachedSessionKeyMetaByAddress.clear();
+  lastSessionKeyCreationByAddress.clear();
+}
+
 async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25519Keypair) {
   // Enforce cooldown to avoid hitting server rate limits
   const now = Date.now();
@@ -397,6 +409,10 @@ async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25
     expiryTime: sessionMeta.createdAt + SESSION_KEY_TTL_MS,
     isExpiredImmediately: key.isExpired(),
   });
+
+  // サーバ側時刻/検証の微妙なズレを吸収（800–1200ms のジッタ）
+  const settle = 800 + Math.floor(Math.random() * 400);
+  await new Promise((r) => setTimeout(r, settle));
 }
 
 function _shouldRefresh(addr: string): boolean {
@@ -421,30 +437,38 @@ async function withSessionKey<T>(
     await resetSessionKey(suiClient, addr, keypair);
   }
 
-  const MAX_RETRIES = 5;
+  const MAX_RETRIES = 7; // 少しだけ増やす
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const sessionMeta = cachedSessionKeyMetaByAddress.get(addr);
       if (!sessionMeta) {
-        throw new Error(`No session key found for address ${addr}`);
+        throw new ExpiredSessionError(`No session key found for address ${addr}`);
       }
       return await fn(sessionMeta.key);
     } catch (e: unknown) {
       lastError = e;
-      const errorStr = String(e);
+      const msg = String(e);
+      const isExpired = e instanceof ExpiredSessionError || msg.toLowerCase().includes("expired");
 
-      if (errorStr.includes("expired")) {
-        logSealIbe(`Attempt ${attempt}: Session expired, creating new session key`, {});
+      if (isExpired) {
+        // 200ms * 2^(attempt-1) + 0–150ms ジッタ
+        const backoff = 200 * 2 ** (attempt - 1) + Math.floor(Math.random() * 150);
+        logSealIbe(`Attempt ${attempt}: expired → backoff ${backoff}ms & refresh`, {});
+        await new Promise((r) => setTimeout(r, backoff));
+
         await resetSessionKey(suiClient, addr, keypair);
+
+        // 再発行直後の追加待機（300–500ms）
+        await new Promise((r) => setTimeout(r, 300 + Math.floor(Math.random() * 200)));
         continue;
       }
 
-      if (errorStr.includes("Scalar out of range")) {
-        logSealIbe(`Attempt ${attempt}: Scalar out of range, retrying`, {
+      if (msg.includes("Scalar out of range")) {
+        logSealIbe(`Attempt ${attempt}: Scalar out of range, retry`, {
           attempt,
-          maxRetries: MAX_RETRIES,
+          MAX_RETRIES,
         });
         // For scalar errors, just retry without refreshing session key
         // The error occurs during ephemeral key generation in createRequestParams
@@ -746,7 +770,7 @@ const fetchSecretKeyShares = async (
         );
         if (hasExpired) {
           logSealIbe("Session expired detected in server responses, throwing for retry");
-          throw new Error("Session key has expired");
+          throw new ExpiredSessionError();
         }
 
         logSealIbe("Key derivation failed", {
@@ -982,6 +1006,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 15000);
 
   test("Step 2: generates SEAL IBE signature with threshold IBE keys", async () => {
+    clearSessionKeyCache();
     const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
     const message = "test-msg";
@@ -998,6 +1023,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 120000);
 
   test("Step 3: verifies signature and creates proof on-chain", async () => {
+    clearSessionKeyCache();
     const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
     const message = "verify-msg";
@@ -1023,6 +1049,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 60000);
 
   test("Step 4: increments counter with verified signature", async () => {
+    clearSessionKeyCache();
     const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
     const initialValue = await getCounterValue(client, stepCounterId);
@@ -1172,6 +1199,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 120000);
 
   test("Integration: completes full SEAL IBE multisig flow (create → sign → verify → increment)", async () => {
+    clearSessionKeyCache();
     // Create new counter for clean integration test
     const integrationCounterId = await createSealIbeMultisigCounter(client, keypair);
 
@@ -1208,5 +1236,5 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     // Verify final state
     const finalValue = await getCounterValue(client, integrationCounterId);
     expect(finalValue).toBe(1);
-  }, 15000);
+  }, 60000);
 });
