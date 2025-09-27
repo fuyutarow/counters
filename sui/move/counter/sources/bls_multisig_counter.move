@@ -32,22 +32,17 @@ module counter::bls_multisig_counter;
 use std::{bcs, type_name};
 use sui::{
     address,
-    bls12381::{
-        G2,
-        g1_from_bytes,
-        g2_from_bytes,
-        g2_add,
-        g2_identity,
-        g2_generator,
-        hash_to_g1,
-        pairing
-    },
-    group_ops::Element,
+    bls12381::{bls12381_min_sig_verify, G2, g2_from_bytes, g2_add, g2_identity},
+    group_ops::{Element, bytes},
+    hex,
     table::{Table, new}
 };
 
 // === Constants ===
 const DST_BLS_MSG_DOMAIN: vector<u8> = b"SUI-MULTI-IBS-V1";
+
+// === Test Constants ===
+#[test_only]
 const DST_HASH_TO_G1_SEAL_ID: vector<u8> = b"SUI-SEAL-IBE-BLS12381-00";
 
 // === Errors ===
@@ -110,8 +105,10 @@ public struct BlsMultisigProof has key {
 /// Aggregated public key for BLS multi-signature verification
 public struct BlsAggregatedPk has key {
     id: UID,
-    /// Accumulated public key in G2 group
+    /// Accumulated public key in G2 group (for internal operations)
     public_key_g2: Element<G2>,
+    /// Accumulated public key in 96-byte format (for standard BLS verification)
+    public_key_bytes: vector<u8>,
     /// ID of the associated counter
     counter_id: ID,
     /// Number of seal shards included in aggregation
@@ -206,9 +203,11 @@ public fun new_bls_aggregated_pk(
     counter: &BlsMultisigCounter,
     ctx: &mut TxContext,
 ): BlsAggregatedPk {
+    let identity_g2 = g2_identity();
     BlsAggregatedPk {
         id: object::new(ctx),
-        public_key_g2: g2_identity(),
+        public_key_g2: identity_g2,
+        public_key_bytes: *bytes(&identity_g2),
         counter_id: object::id(counter),
         seal_shard_count: 0,
         included_seal_shard_ids: vector[],
@@ -237,6 +236,9 @@ public fun aggregate_seal_shard_pubkey(
     let seal_shard_pubkey_g2 = &counter.config.seal_shard_table[seal_shard_id];
     aggregated_key.public_key_g2 = g2_add(&aggregated_key.public_key_g2, seal_shard_pubkey_g2);
 
+    // Update byte representation for standard BLS verification
+    aggregated_key.public_key_bytes = *bytes(&aggregated_key.public_key_g2);
+
     // Record this seal shard ID as included and increment count
     aggregated_key.included_seal_shard_ids.push_back(seal_shard_id);
     aggregated_key.seal_shard_count = aggregated_key.seal_shard_count + 1;
@@ -258,19 +260,18 @@ public fun get_package_id_bytes(): vector<u8> {
     bcs::to_bytes(&addr)
 }
 
-/// Verify a BLS multi-signature (same message) using:
-///   e(sig_sum, g2) == e(H1(DST_HASH_TO_G1_SEAL_ID || FullID), pk_sum)
-/// where:
+/// Verify a BLS multi-signature (same message) using standard Sui BLS verification.
+/// Uses FullID as the message for standard BLS signature verification:
 ///   FullID = package_id || counter_id || signer_address || (DST_BLS_MSG_DOMAIN || message)
+///
+/// This replaces the custom pairing-based verification with the standard
+/// bls12381_min_sig_verify which uses DST: BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
 fun verify_bls_multisig(
     signature_g1_bytes: &vector<u8>,
     message: &vector<u8>,
     aggregated_key: &BlsAggregatedPk,
     signer: address,
 ): bool {
-    // Parse signature from G1 bytes
-    let signature_g1 = g1_from_bytes(signature_g1_bytes);
-
     // Reconstruct FullID same as in seal_approve: counter_id || signer || domain || message
     let mut inner_id = object::id_to_bytes(&aggregated_key.counter_id);
     let signer_bytes = address::to_bytes(signer);
@@ -290,16 +291,10 @@ fun verify_bls_multisig(
     let mut full_id = package_id_bytes;
     full_id.append(inner_id);
 
-    // Hash FullID to G1 using the same DST as Seal key derivation
-    let mut hash_input = DST_HASH_TO_G1_SEAL_ID;
-    hash_input.append(full_id);
-    let msg_hash_g1 = hash_to_g1(&hash_input);
-
-    // Verify pairing equation: e(sig_g1, gen_g2) = e(H₁(FullID), pk_g2)
-    let signature_pairing = pairing(&signature_g1, &g2_generator());
-    let message_pairing = pairing(&msg_hash_g1, &aggregated_key.public_key_g2);
-
-    signature_pairing == message_pairing
+    // Use standard BLS verification with FullID as message
+    // Standard DST: BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
+    // signature: 48 bytes (G1), public_key: 96 bytes (G2), message: FullID
+    bls12381_min_sig_verify(signature_g1_bytes, &aggregated_key.public_key_bytes, &full_id)
 }
 
 // === View Functions ===
@@ -342,11 +337,12 @@ public fun included_seal_shard_count(self: &BlsAggregatedPk): u64 {
     self.included_seal_shard_ids.length()
 }
 
-/// Destroy AggregatedSealShardKey object
+/// Destroy BlsAggregatedPk object
 public fun destroy_bls_aggregated_pk(key: BlsAggregatedPk) {
     let BlsAggregatedPk {
         id,
         public_key_g2: _,
+        public_key_bytes: _,
         counter_id: _,
         seal_shard_count: _,
         included_seal_shard_ids: _,
