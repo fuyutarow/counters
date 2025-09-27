@@ -147,14 +147,16 @@ class SealMultiIBSAggregator {
   }
 
   /**
-   * Retrieve sk_ID_i from Seal Key Servers
+   * Retrieve sk_ID_i from Seal Key Servers for a specific message
    * @param counterId Multi-IBS counter object ID
    * @param signerKeypair Ed25519 keypair for signing
+   * @param message The message to sign
    * @param requiredCount Number of key shares needed
    */
   async fetchSecretKeyShares(
     counterId: string,
     signerKeypair: Ed25519Keypair,
+    message: string,
     requiredCount: number = THRESHOLD,
   ): Promise<KeyShare[]> {
     /**
@@ -168,23 +170,29 @@ class SealMultiIBSAggregator {
      */
 
     try {
-      // Step 1: Construct InnerID = counter_id || signer_address
+      // Step 1: Construct IBE Identity = counter_id || signer_address || message
       const signerAddress = signerKeypair.getPublicKey().toSuiAddress();
+      const messageBytes = new TextEncoder().encode(message);
+
+      // Prepare message with domain separation matching Move contract
+      const messageWithDomain = new Uint8Array([
+        ...new TextEncoder().encode("SUI-MULTI-IBS-V1"),
+        ...messageBytes,
+      ]);
 
       // Convert counter ID to bytes (same as Move object::id().to_bytes())
-      // Move's object::id().to_bytes() returns raw 32-byte array from hex string
       const counterIdBytes = Array.from(Buffer.from(counterId.replace("0x", ""), "hex"));
 
       // Convert signer address to bytes (same as Move bcs::to_bytes(&address))
       const signerBytes = Array.from(Buffer.from(signerAddress.replace("0x", ""), "hex"));
 
-      // Concatenate: counter_id || signer_address (matching Move implementation)
-      const innerIdBytes = [...counterIdBytes, ...signerBytes];
+      // Concatenate: counter_id || signer_address || message_with_domain
+      // This ensures IBE key is specific to this message
+      const ibeIdBytes = [...counterIdBytes, ...signerBytes, ...Array.from(messageWithDomain)];
 
-      // Convert to hex string for fetchKeys ids parameter
-      const innerIdHex = `0x${Buffer.from(innerIdBytes).toString("hex")}`;
+      // Convert to hex string for Seal SDK
+      const ibeIdHex = `0x${Buffer.from(ibeIdBytes).toString("hex")}`;
 
-      // Step 2: Create SessionKey FIRST (following dpp-pilot pattern)
       const sessionKey = await SessionKey.create({
         address: signerAddress,
         packageId: COUNTER_PACKAGE_ID,
@@ -193,32 +201,21 @@ class SealMultiIBSAggregator {
         suiClient: this.suiClient,
       });
 
-      // Step 3: Build and execute seal_approve transaction
+      // Step 3: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
+      // This transaction is only for generating txBytes needed by getDerivedKeys
+      // We don't execute it to avoid changing Key Server object versions
       const approveTx = new Transaction();
       approveTx.moveCall({
         target: `${COUNTER_PACKAGE_ID}::multi_ibs_counter::seal_approve`,
-        arguments: [approveTx.pure.vector("u8", innerIdBytes), approveTx.object(counterId)],
+        arguments: [
+          approveTx.pure.vector("u8", ibeIdBytes), // Use the unified IBE ID
+          approveTx.object(counterId),
+          approveTx.pure.vector("u8", Array.from(messageBytes)), // Add message parameter
+        ],
       });
 
-      // Execute the seal_approve transaction first
-      const approveResult = await this.suiClient.signAndExecuteTransaction({
-        signer: signerKeypair,
-        transaction: approveTx,
-        options: {
-          showEffects: true,
-          requestType: "WaitForLocalExecution",
-        },
-      });
-
-      // Verify transaction success
-      if (approveResult.effects?.status?.status !== "success") {
-        throw new Error(`seal_approve failed: ${approveResult.effects?.status?.error}`);
-      }
-
-      // Small delay to ensure transaction is indexed
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Build the same transaction for txBytes (required by fetchKeys)
+      // Generate txBytes without executing the transaction
+      // This avoids object version conflicts in tests
       const txBytes = await approveTx.build({
         client: this.suiClient,
         onlyTransactionKind: true,
@@ -226,8 +223,9 @@ class SealMultiIBSAggregator {
 
       // Step 4: Get IBE derived keys from Key Servers using getDerivedKeys
       // getDerivedKeys returns Map<string, G1Element> where key is server objectId
+      // Use the message-specific IBE ID for key derivation
       const derivedKeys = await this.sealClient.getDerivedKeys({
-        id: innerIdHex, // Use hex-encoded InnerID
+        id: ibeIdHex, // Use hex-encoded IBE ID (includes message)
         sessionKey,
         txBytes,
         threshold: requiredCount,
@@ -307,6 +305,8 @@ class SealMultiIBSAggregator {
     identity: string,
   ): MultiIBSSignature {
     const messageBytes = new TextEncoder().encode(message);
+
+    // Create Multi-IBS signature using aggregated IBE signature
 
     // For IBE-based signatures, the aggregated IBE key IS the signature
     // No additional signing operation needed
@@ -433,11 +433,11 @@ async function demonstrateMultiIBS() {
   try {
     // Step 1: Fetch IBE key shares from Seal servers
     const identity = signerKeypair.getPublicKey().toSuiAddress();
-    const keyShares = await aggregator.fetchSecretKeyShares(identity, signerKeypair, 2);
+    const message = `increment-counter-${Date.now()}`;
+    const keyShares = await aggregator.fetchSecretKeyShares(identity, signerKeypair, message, 2);
     const aggregatedSK = aggregator.aggregateSecretKeys(keyShares);
 
     // Step 2: Create Multi-IBS signature
-    const message = `increment-counter-${Date.now()}`;
     const _multiSig = aggregator.createMultiIBSSignature(aggregatedSK, message, identity);
 
     // Note: Blockchain submission would require deployed contract

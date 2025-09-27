@@ -115,19 +115,24 @@ const generateBLSSignature = async (
   const sealAggregator = new SealMultiIBSAggregator();
 
   try {
-    // Step 1: Fetch IBE key shares from real Key Servers
-    const keyShares = await sealAggregator.fetchSecretKeyShares(counterId, keypair, THRESHOLD);
+    // Step 1: Fetch IBE key shares from real Key Servers for the specific message
+    const keyShares = await sealAggregator.fetchSecretKeyShares(
+      counterId,
+      keypair,
+      message,
+      THRESHOLD,
+    );
 
     if (keyShares.length !== THRESHOLD) {
       throw new Error(`Expected ${THRESHOLD} key shares, got ${keyShares.length}`);
     }
 
-    // Step 2: Aggregate secret keys
-    const aggregatedSecretKey = sealAggregator.aggregateSecretKeys(keyShares);
+    // Step 2: Aggregate IBE keys (which are already message-specific)
+    const aggregatedIBESignature = sealAggregator.aggregateSecretKeys(keyShares);
 
-    // Step 3: Create BLS signature
+    // Step 3: Use aggregated IBE key as BLS signature
     const signature = sealAggregator.createMultiIBSSignature(
-      aggregatedSecretKey,
+      aggregatedIBESignature,
       message,
       keypair.getPublicKey().toSuiAddress(),
     );
@@ -229,7 +234,7 @@ describe("Multi-IBS End-to-End Integration", () => {
     // Verify initial counter value is 0
     const initialValue = await getCounterValue(client, counterId);
     expect(initialValue).toBe(0);
-  });
+  }, 15000);
 
   test("Step 2: generates BLS signature with threshold IBE keys", async () => {
     if (!counterId) throw new Error("Counter not created - run Step 1 first");
@@ -299,6 +304,10 @@ describe("Multi-IBS End-to-End Integration", () => {
     // Create new counter for clean integration test
     const integrationCounterId = await createMultiIBSCounter(client, keypair);
 
+    if (!integrationCounterId) {
+      throw new Error("Failed to create integration counter - got undefined");
+    }
+
     // Verify initial state
     const initialValue = await getCounterValue(client, integrationCounterId);
     expect(initialValue).toBe(0);
@@ -325,5 +334,5 @@ describe("Multi-IBS End-to-End Integration", () => {
     // Verify final state
     const finalValue = await getCounterValue(client, integrationCounterId);
     expect(finalValue).toBe(1);
-  });
+  }, 15000);
 });
