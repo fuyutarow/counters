@@ -25,8 +25,9 @@
 
 module counter::multi_ibs_counter;
 
+use std::{bcs, type_name};
 use sui::{
-    bcs,
+    address,
     bls12381::{
         G2,
         g1_from_bytes,
@@ -43,6 +44,7 @@ use sui::{
 
 // === Constants ===
 const DOMAIN_SEPARATOR_BLS: vector<u8> = b"SUI-MULTI-IBS-V1";
+const SEAL_DST_ID: vector<u8> = b"SUI-SEAL-IBE-BLS12381-00";
 
 // === Errors ===
 #[error]
@@ -74,6 +76,9 @@ const EInvalidID: vector<u8> =
 const ELengthMismatch: vector<u8> = b"Seal shard IDs and public keys vectors must have same length";
 
 // === Structs ===
+
+/// Marker type for dynamic package ID extraction
+public struct PackageMarker has drop {}
 
 /// Configuration for Multi-IBS verification
 /// Stores seal shard public keys in Table mapped by Key Server ID
@@ -169,6 +174,7 @@ public fun verify_and_create_proof(
             &signature_g1_bytes,
             &message,
             aggregated_key,
+            ctx.sender(),
         ),
         ESignatureVerificationFailed,
     );
@@ -241,27 +247,51 @@ fun assert_all_unique<T: drop + copy>(items: &vector<T>) {
     });
 }
 
-/// Verify BLS signature using pairing equation
-/// e(signature_g1, generator_g2) = e(message_hash_g1, public_key_g2)
+/// Get current package ID dynamically using type reflection
+public fun get_package_id_bytes(): vector<u8> {
+    let addr: address = type_name::original_id<PackageMarker>();
+    bcs::to_bytes(&addr)
+}
+
+/// Verify IBE-based BLS signature using pairing equation
+/// e(signature_g1, generator_g2) = e(H₁(IBE_ID), public_key_g2)
+/// where IBE_ID = counter_id || signer || domain || message
 fun verify_bls_signature(
     signature_g1_bytes: &vector<u8>,
     message: &vector<u8>,
     aggregated_key: &AggregatedPublicKey,
+    signer: address,
 ): bool {
     // Parse signature from G1 bytes
     let signature_g1 = g1_from_bytes(signature_g1_bytes);
 
-    // Prepare message with domain separation
+    // Reconstruct IBE ID same as in seal_approve: counter_id || signer || domain || message
+    let mut ibe_id = object::id_to_bytes(&aggregated_key.counter_id);
+    let signer_bytes = address::to_bytes(signer);
+    ibe_id.append(signer_bytes);
+
+    // Prepare message with domain separation (same as in seal_approve)
     let mut message_with_domain = vector[];
     message_with_domain.append(DOMAIN_SEPARATOR_BLS);
     message_with_domain.append(*message);
 
-    // Hash message to G1 point
-    let message_hash_g1 = hash_to_g1(&message_with_domain);
+    // Append domain + message to IBE ID
+    ibe_id.append(message_with_domain);
 
-    // Verify pairing equation: e(sig_g1, gen_g2) = e(hash_g1, pk_g2)
+    // Construct FullID: [PackageID][InnerID] (matching Seal SDK)
+    // Seal SDK automatically prepends PackageID, so Move must do the same
+    let package_id_bytes = get_package_id_bytes();
+    let mut full_id = package_id_bytes;
+    full_id.append(ibe_id);
+
+    // Hash FullID to G1 using the same DST as Seal key derivation
+    let mut ibe_hash_input = SEAL_DST_ID;
+    ibe_hash_input.append(full_id);
+    let ibe_hash_g1 = hash_to_g1(&ibe_hash_input);
+
+    // Verify pairing equation: e(sig_g1, gen_g2) = e(H₁(IBE_ID), pk_g2)
     let signature_pairing = pairing(&signature_g1, &g2_generator());
-    let message_pairing = pairing(&message_hash_g1, &aggregated_key.public_key_g2);
+    let message_pairing = pairing(&ibe_hash_g1, &aggregated_key.public_key_g2);
 
     signature_pairing == message_pairing
 }
@@ -332,12 +362,26 @@ public fun test_destroy_proof(proof: MultiIBSProof) {
 // === Seal Integration Functions ===
 
 /// Seal approve function for Seal Shard counter access
-/// InnerID structure: counter_id || signer_address
-entry fun seal_approve(id: vector<u8>, counter: &MultiIBSCounter, _ctx: &TxContext) {
-    // Construct expected InnerID: counter_id || signer_address
-    let mut expected_inner_id = object::id(counter).to_bytes();
-    let signer_bytes = bcs::to_bytes(&_ctx.sender());
+/// InnerID structure: counter_id || signer_address || H(domain || message)
+entry fun seal_approve(
+    id: vector<u8>,
+    counter: &MultiIBSCounter,
+    message: vector<u8>,
+    _ctx: &TxContext,
+) {
+    // Construct expected InnerID: counter_id || signer_address || H(domain || message)
+    let mut expected_inner_id = object::id_to_bytes(&object::id(counter));
+    let signer_bytes = address::to_bytes(_ctx.sender());
     expected_inner_id.append(signer_bytes);
+
+    // Prepare message with domain separation matching BLS verification
+    let mut message_with_domain = vector[];
+    message_with_domain.append(DOMAIN_SEPARATOR_BLS);
+    message_with_domain.append(message);
+
+    // Include the raw message bytes instead of G1 hash
+    // This maintains the ID uniqueness while avoiding G1 serialization issues
+    expected_inner_id.append(message_with_domain);
 
     // Verify the provided ID matches expected InnerID
     assert!(id == expected_inner_id, EInvalidID);
@@ -396,4 +440,89 @@ public fun test_create_proof(
         counter_id: object::id(counter),
         verified_signer_count,
     }
+}
+
+/// Debug function to test ID construction with fixed values
+#[test]
+public fun test_debug_id_construction() {
+    use std::debug;
+
+    debug::print(&b"=== Move ID Construction Debug ===");
+
+    // Use same fixed values as TypeScript debug script
+    let counter_id_bytes = x"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    let signer = @0x5678901234567890abcdef1234567890abcdef1234567890abcdef1234567890;
+    let message = b"test-message";
+
+    debug::print(&b"Fixed values:");
+    debug::print(
+        &b"Counter ID bytes: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    );
+    debug::print(&b"Signer: 5678901234567890abcdef1234567890abcdef1234567890abcdef1234567890");
+    debug::print(&b"Message: test-message");
+
+    // Step 1: Start with counter ID bytes (already in bytes)
+    let mut ibe_id = counter_id_bytes;
+    debug::print(&b"Step 1 - Counter ID bytes (32 bytes):");
+    debug::print(&hex::encode(ibe_id));
+
+    // Step 2: Append signer address bytes
+    let signer_bytes = address::to_bytes(signer);
+    ibe_id.append(signer_bytes);
+    debug::print(&b"Step 2 - After appending signer (64 bytes):");
+    debug::print(&hex::encode(ibe_id));
+
+    // Step 3: Prepare message with domain separation
+    let mut message_with_domain = vector[];
+    message_with_domain.append(DOMAIN_SEPARATOR_BLS);
+    message_with_domain.append(message);
+
+    debug::print(&b"Step 3 - Message with domain:");
+    debug::print(&b"Domain separator: SUI-MULTI-IBS-V1");
+    debug::print(&hex::encode(DOMAIN_SEPARATOR_BLS));
+    debug::print(&b"Message bytes:");
+    debug::print(&hex::encode(message));
+    debug::print(&b"Combined message with domain:");
+    debug::print(&hex::encode(message_with_domain));
+
+    // Step 4: Complete InnerID construction
+    ibe_id.append(message_with_domain);
+    debug::print(&b"Step 4 - InnerID construction:");
+    debug::print(&b"Length (should be 92 bytes):");
+    debug::print(&(ibe_id.length() as u64));
+    debug::print(&b"InnerID hex:");
+    debug::print(&hex::encode(ibe_id));
+
+    // Step 5: Package address bytes
+    let package_bytes = address::to_bytes(@counter);
+    debug::print(&b"Step 5 - Package ID bytes (32 bytes):");
+    debug::print(&hex::encode(package_bytes));
+
+    // Step 6: FullID construction (package_id || inner_id)
+    let mut full_id = package_bytes;
+    full_id.append(ibe_id);
+    debug::print(&b"Step 6 - FullID construction:");
+    debug::print(&b"Length (should be 124 bytes):");
+    debug::print(&(full_id.length() as u64));
+    debug::print(&b"FullID hex:");
+    debug::print(&hex::encode(full_id));
+
+    // Step 7: Hash input for hash_to_g1
+    let mut ibe_hash_input = SEAL_DST_ID;
+    ibe_hash_input.append(full_id);
+    debug::print(&b"Step 7 - Hash input for hash_to_g1:");
+    debug::print(&b"SEAL DST: SUI-SEAL-IBE-BLS12381-00");
+    debug::print(&hex::encode(SEAL_DST_ID));
+    debug::print(&b"Hash input length (should be 148 bytes):");
+    debug::print(&(ibe_hash_input.length() as u64));
+    debug::print(&b"Hash input hex:");
+    debug::print(&hex::encode(ibe_hash_input));
+
+    debug::print(&b"=== Summary ===");
+    debug::print(&b"InnerID (92 bytes):");
+    debug::print(&hex::encode(ibe_id));
+    debug::print(&b"FullID (124 bytes):");
+    debug::print(&hex::encode(full_id));
+    debug::print(&b"Hash input (148 bytes):");
+    debug::print(&hex::encode(ibe_hash_input));
 }
