@@ -103,7 +103,8 @@
       "Bash(tsx scripts/calc-hash-typescript.ts:*)",
       "Read(//home/fuyu/MYSTENLABS/sui/crates/sui-framework/packages/sui-framework/sources/crypto/**)",
       "Bash(SEAL_TEST_THRESHOLD=1 m t)",
-      "Read(//home/fuyu/**)"
+      "Read(//home/fuyu/**)",
+      "mcp__serena__think_about_whether_you_are_done"
     ],
     "deny": [],
     "ask": []

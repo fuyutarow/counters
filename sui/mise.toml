@@ -56,7 +56,7 @@ echo "🎉 デプロイ完了！"
 [tasks.test]
 description = "全テストの実行"
 alias = "t"
-run = "bun test"
+run = "bun test __tests__"
 
 [tasks.clean]
 description = "全ビルド成果物のクリーンアップ"

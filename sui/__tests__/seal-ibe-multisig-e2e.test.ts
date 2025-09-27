@@ -15,7 +15,6 @@ import { SealClient, SessionKey } from "@mysten/seal";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { type Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
-import { fromB64 } from "@mysten/sui/utils";
 import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { consola } from "consola";
 import { counterPackage, type Seal_ibe_multisig_counterSealIbeMultisigCounterType } from "@/abi";
@@ -28,7 +27,6 @@ const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
   ? Number(process.env.SEAL_TEST_THRESHOLD)
   : THRESHOLD;
 const COUNTER_PACKAGE_ID = counterPackage.packageId;
-let ORIGINAL_COUNTER_PACKAGE_ID: `0x${string}`;
 
 // ================================
 // PHASE 0: SYSTEMATIC DEBUGGING
@@ -165,44 +163,6 @@ interface BlsMultisigSignature {
 
 // BLS signature utilities
 const _blss = bls12_381.shortSignatures;
-
-async function fetchOriginalCounterPackageId(
-  client: SuiClient,
-  sender: string,
-): Promise<`0x${string}`> {
-  const tx = new Transaction();
-  counterPackage.seal_ibe_multisig_counter.get_package_id_bytes(tx, {
-    arguments: [],
-  });
-
-  const txBytes = await tx.build({ client, onlyTransactionKind: true });
-  const devInspect = await client.devInspectTransactionBlock({
-    sender,
-    transactionBlock: txBytes,
-  });
-
-  const returnValues = devInspect.results?.flatMap((result) => result.returnValues ?? []);
-  const firstValue = returnValues?.[0];
-  if (!firstValue) {
-    throw new Error("get_package_id_bytes returned empty result");
-  }
-
-  const [rawValue] = firstValue;
-  const rawBytes =
-    typeof rawValue === "string" ? fromB64(rawValue) : Uint8Array.from(rawValue as number[]);
-
-  if (rawBytes.length === 0) {
-    throw new Error("get_package_id_bytes returned empty payload");
-  }
-
-  const length = rawBytes[0];
-  if (length !== 32 || rawBytes.length < 1 + length) {
-    throw new Error(`Unexpected package id length: ${length}`);
-  }
-
-  const pkgBytes = rawBytes.slice(1, 1 + length);
-  return `0x${Buffer.from(pkgBytes).toString("hex")}` as const;
-}
 
 // ================================
 // DEBUG UTILITIES for SEAL IBE
@@ -411,7 +371,7 @@ async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25
   logSealIbe("Creating new session key", { address: addr });
   const key = await SessionKey.create({
     address: addr,
-    packageId: ORIGINAL_COUNTER_PACKAGE_ID,
+    packageId: COUNTER_PACKAGE_ID,
     ttlMin: SESSION_KEY_TTL_MIN,
     signer: keypair,
     suiClient,
@@ -452,12 +412,12 @@ async function withSessionKey<T>(
   keypair: Ed25519Keypair,
   fn: (sk: SessionKey) => Promise<T>,
 ): Promise<T> {
-  // Reset cache and create completely fresh session key for each operation
-  cachedSessionKeyMeta = null;
-  lastSessionKeyCreation = 0;
-  await resetSessionKey(suiClient, addr, keypair);
+  // Create session key if needed or refresh if expired
+  if (_shouldRefresh(cachedSessionKeyMeta)) {
+    await resetSessionKey(suiClient, addr, keypair);
+  }
 
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 5;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -772,6 +732,15 @@ const fetchSecretKeyShares = async (
       keyShares.sort((a, b) => a.serverIndex - b.serverIndex);
 
       if (keyShares.length < requiredCount) {
+        // Check for expired session keys before throwing aggregated error
+        const hasExpired = errors.some((e) =>
+          e.error.toLowerCase().includes("session key has expired"),
+        );
+        if (hasExpired) {
+          logSealIbe("Session expired detected in server responses, throwing for retry");
+          throw new Error("Session key has expired");
+        }
+
         logSealIbe("Key derivation failed", {
           need: requiredCount,
           got: keyShares.length,
@@ -984,15 +953,12 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     client = new SuiClient({ url: getFullnodeUrl(NETWORK) });
     const primeKeyInfo = getKeypair("PRIME");
     keypair = primeKeyInfo.keypair;
-    ORIGINAL_COUNTER_PACKAGE_ID = await fetchOriginalCounterPackageId(
-      client,
-      keypair.getPublicKey().toSuiAddress(),
-    );
 
     logSealIbe("Test Initialization", {
       network: NETWORK,
       threshold: THRESHOLD_RUNTIME,
       idMode: ID_MODE,
+      packageId: COUNTER_PACKAGE_ID,
     });
   });
 
