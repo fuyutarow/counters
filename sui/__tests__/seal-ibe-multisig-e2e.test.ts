@@ -355,16 +355,17 @@ const SESSION_KEY_TTL_MS = SESSION_KEY_TTL_MIN * 60 * 1000;
 const SESSION_KEY_REFRESH_MARGIN_MS = 6 * 60 * 1000;
 const SESSION_KEY_COOLDOWN_MS = 5 * 1000; // 5 second cooldown between session key creations
 
-let cachedSessionKeyMeta: SessionKeyMeta | null = null;
-let lastSessionKeyCreation = 0;
+const cachedSessionKeyMetaByAddress = new Map<string, SessionKeyMeta>();
+const lastSessionKeyCreationByAddress = new Map<string, number>();
 
 async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25519Keypair) {
   // Enforce cooldown to avoid hitting server rate limits
   const now = Date.now();
-  const timeSinceLastCreation = now - lastSessionKeyCreation;
+  const lastCreation = lastSessionKeyCreationByAddress.get(addr) || 0;
+  const timeSinceLastCreation = now - lastCreation;
   if (timeSinceLastCreation < SESSION_KEY_COOLDOWN_MS) {
     const waitTime = SESSION_KEY_COOLDOWN_MS - timeSinceLastCreation;
-    logSealIbe("Session key cooldown", { waitTime: `${waitTime}ms` });
+    logSealIbe("Session key cooldown", { waitTime: `${waitTime}ms`, address: addr });
     await new Promise((resolve) => setTimeout(resolve, waitTime));
   }
 
@@ -377,26 +378,29 @@ async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25
     suiClient,
   });
 
-  lastSessionKeyCreation = Date.now();
-  cachedSessionKeyMeta = {
+  lastSessionKeyCreationByAddress.set(addr, Date.now());
+  cachedSessionKeyMetaByAddress.set(addr, {
     key,
     createdAt: Date.now(),
     ttlMs: SESSION_KEY_TTL_MS,
-  };
+  });
 
+  const sessionMeta = cachedSessionKeyMetaByAddress.get(addr)!;
   const currentTime = Date.now();
   logSealIbe("Session key created", {
-    createdAt: cachedSessionKeyMeta.createdAt,
+    address: addr,
+    createdAt: sessionMeta.createdAt,
     currentTime,
-    timeDiff: currentTime - cachedSessionKeyMeta.createdAt,
+    timeDiff: currentTime - sessionMeta.createdAt,
     ttlMin: SESSION_KEY_TTL_MIN,
     ttlMs: SESSION_KEY_TTL_MS,
-    expiryTime: cachedSessionKeyMeta.createdAt + SESSION_KEY_TTL_MS,
+    expiryTime: sessionMeta.createdAt + SESSION_KEY_TTL_MS,
     isExpiredImmediately: key.isExpired(),
   });
 }
 
-function _shouldRefresh(meta: SessionKeyMeta | null): boolean {
+function _shouldRefresh(addr: string): boolean {
+  const meta = cachedSessionKeyMetaByAddress.get(addr);
   if (!meta) {
     return true;
   }
@@ -413,7 +417,7 @@ async function withSessionKey<T>(
   fn: (sk: SessionKey) => Promise<T>,
 ): Promise<T> {
   // Create session key if needed or refresh if expired
-  if (_shouldRefresh(cachedSessionKeyMeta)) {
+  if (_shouldRefresh(addr)) {
     await resetSessionKey(suiClient, addr, keypair);
   }
 
@@ -422,7 +426,11 @@ async function withSessionKey<T>(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      return await fn(cachedSessionKeyMeta?.key);
+      const sessionMeta = cachedSessionKeyMetaByAddress.get(addr);
+      if (!sessionMeta) {
+        throw new Error(`No session key found for address ${addr}`);
+      }
+      return await fn(sessionMeta.key);
     } catch (e: unknown) {
       lastError = e;
       const errorStr = String(e);
@@ -974,10 +982,10 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 15000);
 
   test("Step 2: generates SEAL IBE signature with threshold IBE keys", async () => {
-    if (!counterId) throw new Error("Counter not created - run Step 1 first");
+    const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
     const message = "test-msg";
-    const result = await generateSealIbeSignature(client, counterId, keypair, message);
+    const result = await generateSealIbeSignature(client, stepCounterId, keypair, message);
 
     // Verify signature format (G1 compressed point = 48 bytes)
     expect(result.signature).toHaveLength(48);
@@ -990,12 +998,12 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 120000);
 
   test("Step 3: verifies signature and creates proof on-chain", async () => {
-    if (!counterId) throw new Error("Counter not created - run Step 1 first");
+    const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
     const message = "verify-msg";
     const { signature, keyServerIds } = await generateSealIbeSignature(
       client,
-      counterId,
+      stepCounterId,
       keypair,
       message,
     );
@@ -1003,7 +1011,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     // This should not throw an error if verification succeeds
     const digest = await verifySignatureAndCreateProof(
       client,
-      counterId,
+      stepCounterId,
       keypair,
       signature,
       message,
@@ -1015,21 +1023,21 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
   }, 60000);
 
   test("Step 4: increments counter with verified signature", async () => {
-    if (!counterId) throw new Error("Counter not created - run Step 1 first");
+    const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
-    const initialValue = await getCounterValue(client, counterId);
+    const initialValue = await getCounterValue(client, stepCounterId);
     const message = "incr-msg";
 
     const { signature, keyServerIds } = await generateSealIbeSignature(
       client,
-      counterId,
+      stepCounterId,
       keypair,
       message,
     );
 
     const digest = await verifySignatureAndCreateProof(
       client,
-      counterId,
+      stepCounterId,
       keypair,
       signature,
       message,
@@ -1040,7 +1048,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     await client.waitForTransaction({ digest });
 
     // Verify counter was incremented
-    const finalValue = await getCounterValue(client, counterId);
+    const finalValue = await getCounterValue(client, stepCounterId);
     expect(finalValue).toBe(initialValue + 1);
   }, 60000);
 
