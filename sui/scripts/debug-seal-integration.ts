@@ -29,4 +29,7 @@ const debugSealIntegration = async () => {
 };
 
 // Run debug
-debugSealIntegration().catch(console.error);
+debugSealIntegration().catch((error) => {
+  process.stderr.write(`Error: ${error}\n`);
+  process.exit(1);
+});

@@ -95,4 +95,7 @@ const debugSealInternal = async () => {
 };
 
 // Run debug
-debugSealInternal().catch(console.error);
+debugSealInternal().catch((error) => {
+  process.stderr.write(`Error: ${error}\n`);
+  process.exit(1);
+});

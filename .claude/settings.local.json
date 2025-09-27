@@ -97,7 +97,10 @@
       "Bash(DEBUG=true bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi)",
       "Read(//home/fuyu/OPENJPY/counters/MYSTENLABS/seal/move/patterns/sources/**)",
       "Bash(DEBUG=true bun --inspect scripts/suigenv0.ts -c suigen-config.json -o src/abi -n testnet)",
-      "Read(//home/fuyu/OPENJPY/**)"
+      "Read(//home/fuyu/OPENJPY/**)",
+      "Bash(python3:*)",
+      "mcp__serena__think_about_task_adherence",
+      "Bash(tsx scripts/calc-hash-typescript.ts:*)"
     ],
     "deny": [],
     "ask": []

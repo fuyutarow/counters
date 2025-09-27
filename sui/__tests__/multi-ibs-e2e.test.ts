@@ -90,6 +90,9 @@ const createMultiIBSCounter = async (
     throw new Error(`Counter creation failed: ${result.effects?.status?.error}`);
   }
 
+  // Wait for transaction to be processed
+  await client.waitForTransaction({ digest: result.digest });
+
   const created = result.objectChanges?.find(
     (change) => change.type === "created" && change.objectType?.includes("MultiIBSCounter"),
   );
@@ -158,7 +161,7 @@ const verifySignatureAndCreateProof = async (
   signature: Uint8Array,
   message: string,
   keyServerIds: string[],
-): Promise<void> => {
+): Promise<string> => {
   const tx = new Transaction();
   const messageBytes = new TextEncoder().encode(message);
 
@@ -209,6 +212,8 @@ const verifySignatureAndCreateProof = async (
   if (result.effects?.status?.status !== "success") {
     throw new Error(`Signature verification failed: ${result.effects?.status?.error}`);
   }
+
+  return result.digest;
 };
 
 describe("Multi-IBS End-to-End Integration", () => {
@@ -227,9 +232,6 @@ describe("Multi-IBS End-to-End Integration", () => {
 
     // Verify counter was created with correct format
     expect(counterId).toMatch(/^0x[a-f0-9]{64}$/);
-
-    // Wait for object to be indexed
-    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Verify initial counter value is 0
     const initialValue = await getCounterValue(client, counterId);
@@ -264,7 +266,7 @@ describe("Multi-IBS End-to-End Integration", () => {
     );
 
     // This should not throw an error if verification succeeds
-    await verifySignatureAndCreateProof(
+    const digest = await verifySignatureAndCreateProof(
       client,
       counterId,
       keypair,
@@ -272,13 +274,16 @@ describe("Multi-IBS End-to-End Integration", () => {
       message,
       keyServerIds,
     );
-  });
+
+    // Wait for transaction to be processed
+    await client.waitForTransaction({ digest });
+  }, 15000);
 
   test("Step 4: increments counter with verified signature", async () => {
     if (!counterId) throw new Error("Counter not created - run Step 1 first");
 
     const initialValue = await getCounterValue(client, counterId);
-    const message = `increment-test-${Date.now()}`;
+    const message = `step4-increment-test-${Date.now()}`;
 
     const { signature, keyServerIds } = await generateBLSSignature(
       client,
@@ -286,7 +291,8 @@ describe("Multi-IBS End-to-End Integration", () => {
       keypair,
       message,
     );
-    await verifySignatureAndCreateProof(
+
+    const digest = await verifySignatureAndCreateProof(
       client,
       counterId,
       keypair,
@@ -295,10 +301,13 @@ describe("Multi-IBS End-to-End Integration", () => {
       keyServerIds,
     );
 
+    // Wait for transaction to be processed
+    await client.waitForTransaction({ digest });
+
     // Verify counter was incremented
     const finalValue = await getCounterValue(client, counterId);
     expect(finalValue).toBe(initialValue + 1);
-  });
+  }, 15000);
 
   test("Integration: completes full Multi-IBS flow (create → sign → verify → increment)", async () => {
     // Create new counter for clean integration test
@@ -322,7 +331,7 @@ describe("Multi-IBS End-to-End Integration", () => {
     );
 
     // Verify and increment in one transaction
-    await verifySignatureAndCreateProof(
+    const digest = await verifySignatureAndCreateProof(
       client,
       integrationCounterId,
       keypair,
@@ -330,6 +339,9 @@ describe("Multi-IBS End-to-End Integration", () => {
       message,
       keyServerIds,
     );
+
+    // Wait for transaction to be processed
+    await client.waitForTransaction({ digest });
 
     // Verify final state
     const finalValue = await getCounterValue(client, integrationCounterId);
