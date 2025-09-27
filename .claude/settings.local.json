@@ -102,7 +102,8 @@
       "mcp__serena__think_about_task_adherence",
       "Bash(tsx scripts/calc-hash-typescript.ts:*)",
       "Read(//home/fuyu/MYSTENLABS/sui/crates/sui-framework/packages/sui-framework/sources/crypto/**)",
-      "Bash(SEAL_TEST_THRESHOLD=1 m t)"
+      "Bash(SEAL_TEST_THRESHOLD=1 m t)",
+      "Read(//home/fuyu/**)"
     ],
     "deny": [],
     "ask": []

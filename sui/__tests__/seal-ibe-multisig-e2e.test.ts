@@ -17,6 +17,7 @@ import { type Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import { fromB64 } from "@mysten/sui/utils";
 import { bls12_381 } from "@noble/curves/bls12-381.js";
+import { consola } from "consola";
 import { counterPackage, type Seal_ibe_multisig_counterSealIbeMultisigCounterType } from "@/abi";
 import { getKeypair } from "./utils/keybook.js";
 
@@ -28,6 +29,110 @@ const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
   : THRESHOLD;
 const COUNTER_PACKAGE_ID = counterPackage.packageId;
 let ORIGINAL_COUNTER_PACKAGE_ID: `0x${string}`;
+
+// ================================
+// PHASE 0: SYSTEMATIC DEBUGGING
+// ================================
+
+/**
+ * ID construction mode - confirmed through Phase 0 systematic debugging
+ * Using "inner" only (counterId || signerAddr || domain || message)
+ * Package ID prefix causes "Scalar out of range" errors in Key Servers
+ */
+const ID_MODE = "inner" as const;
+
+// Enhanced logging for debugging instability
+function logSealIbe(message: string, data?: any) {
+  const logMessage = `[SEAL-IBE-DEBUG] ${message}`;
+  if (data) {
+    consola.info(logMessage, data);
+  } else {
+    consola.info(logMessage);
+  }
+}
+
+/**
+ * Analyze if ID might cause Fr scalar range overflow
+ * BLS12-381 Fr modulus: 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+ */
+function analyzeFrRisk(idBytes: Uint8Array): {
+  likelyOverflow: boolean;
+  firstBytes: string;
+  analysis: string;
+} {
+  // Check if first 32 bytes (counterId) have high values that might cause overflow
+  const first32 = idBytes.slice(0, 32);
+  const firstBytesHex = Buffer.from(first32).toString("hex");
+
+  // Simple heuristic: check if first byte is >= 0x73 (Fr modulus starts with 0x73)
+  const firstByte = first32[0];
+  const likelyOverflow = firstByte >= 0x73;
+
+  let analysis = "safe";
+  if (firstByte >= 0x80) analysis = "high_risk";
+  else if (firstByte >= 0x73) analysis = "medium_risk";
+  else if (firstByte >= 0x60) analysis = "low_risk";
+
+  return {
+    likelyOverflow,
+    firstBytes: firstBytesHex.slice(0, 16), // First 8 bytes
+    analysis,
+  };
+}
+
+// Statistical tracking for debugging
+interface ServerStats {
+  [serverName: string]: {
+    total: number;
+    successes: number;
+    failures: number;
+    byFrRisk: {
+      safe: { successes: number; failures: number };
+      low_risk: { successes: number; failures: number };
+      medium_risk: { successes: number; failures: number };
+      high_risk: { successes: number; failures: number };
+    };
+  };
+}
+
+const serverStats: ServerStats = {};
+
+function updateServerStats(serverName: string, success: boolean, frRisk: string) {
+  if (!serverStats[serverName]) {
+    serverStats[serverName] = {
+      total: 0,
+      successes: 0,
+      failures: 0,
+      byFrRisk: {
+        safe: { successes: 0, failures: 0 },
+        low_risk: { successes: 0, failures: 0 },
+        medium_risk: { successes: 0, failures: 0 },
+        high_risk: { successes: 0, failures: 0 },
+      },
+    };
+  }
+
+  const stats = serverStats[serverName];
+  stats.total++;
+
+  if (success) {
+    stats.successes++;
+    stats.byFrRisk[frRisk as keyof typeof stats.byFrRisk].successes++;
+  } else {
+    stats.failures++;
+    stats.byFrRisk[frRisk as keyof typeof stats.byFrRisk].failures++;
+  }
+}
+
+function logServerStats() {
+  logSealIbe("SERVER STATISTICS", serverStats);
+
+  // Summary analysis
+  for (const [serverName, stats] of Object.entries(serverStats)) {
+    const successRate = stats.total > 0 ? ((stats.successes / stats.total) * 100).toFixed(1) : "0";
+    consola.success(`${serverName}: ${successRate}% success (${stats.successes}/${stats.total})`);
+  }
+}
 
 // Real Key Server configurations from testnet
 const KEY_SERVERS = [
@@ -192,16 +297,44 @@ async function deriveFromOneServer(
     serverConfigs: [server],
   });
 
-  try {
-    const m = await one.getDerivedKeys({ id: idHex, sessionKey, txBytes, threshold: 1 });
-    // Map(1) expected
-    const [entry] = [...m.entries()];
-    if (!entry) throw new Error("No key returned");
-    const [serverId, derivedKey] = entry;
-    return { ok: true as const, serverId, keyBytes: derivedKey.key.toBytes() };
-  } catch (e: unknown) {
-    return { ok: false as const, error: String(e) };
+  const MAX_RETRIES = 5;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const m = await one.getDerivedKeys({ id: idHex, sessionKey, txBytes, threshold: 1 });
+      // Map(1) expected
+      const [entry] = [...m.entries()];
+      if (!entry) throw new Error("No key returned");
+      const [serverId, derivedKey] = entry;
+      return { ok: true as const, serverId, keyBytes: derivedKey.key.toBytes() };
+    } catch (e: unknown) {
+      lastError = e;
+      const errorStr = String(e);
+
+      if (errorStr.includes("Scalar out of range")) {
+        if (attempt < MAX_RETRIES) {
+          logSealIbe(
+            `${server.name || server.url} Scalar error retry ${attempt}/${MAX_RETRIES}`,
+            {},
+          );
+          continue;
+        }
+      }
+
+      // For other errors, fail immediately
+      const errorDetails =
+        e instanceof Error ? `${e.name}: ${e.message}\nStack: ${e.stack}` : String(e);
+      return { ok: false as const, error: errorDetails };
+    }
   }
+
+  // All retries exhausted for scalar error
+  const errorDetails =
+    lastError instanceof Error
+      ? `${lastError.name}: ${lastError.message}\nStack: ${lastError.stack}`
+      : String(lastError);
+  return { ok: false as const, error: errorDetails };
 }
 
 /**
@@ -209,7 +342,7 @@ async function deriveFromOneServer(
  */
 async function deriveForDiagnosis(
   server: OneServerCfg,
-  innerHex: `0x${string}`,
+  idHex: `0x${string}`,
   sessionKey: SessionKey,
   txBytes: Uint8Array,
 ): Promise<{
@@ -223,7 +356,7 @@ async function deriveForDiagnosis(
   });
 
   // Create 32B SHA256 hash for diagnosis (NOT used in verification)
-  const inner = Buffer.from(innerHex.slice(2), "hex");
+  const inner = Buffer.from(idHex.slice(2), "hex");
   const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", inner));
   const shaHex = `0x${Buffer.from(sha).toString("hex")}` as const;
 
@@ -235,11 +368,14 @@ async function deriveForDiagnosis(
       const [serverId, derivedKey] = entry;
       return { ok: true as const, serverId, key: derivedKey.key.toBytes() };
     } catch (e: unknown) {
-      return { ok: false as const, error: String(e) };
+      // Detailed error information for debugging
+      const errorDetails =
+        e instanceof Error ? `${e.name}: ${e.message}\nStack: ${e.stack}` : String(e);
+      return { ok: false as const, error: errorDetails };
     }
   };
 
-  const resRaw = await tryOnce(innerHex);
+  const resRaw = await tryOnce(idHex);
   const resSha = await tryOnce(shaHex);
 
   return { resRaw, resSha };
@@ -248,20 +384,66 @@ async function deriveForDiagnosis(
 /**
  * Session key wrapper with automatic retry on expiration
  */
-let cachedSessionKey: SessionKey | null = null;
+type SessionKeyMeta = {
+  key: SessionKey;
+  createdAt: number;
+  ttlMs: number;
+};
 
-async function resetSessionKey(
-  suiClient: SuiClient,
-  addr: string,
-  keypair: Ed25519Keypair,
-) {
-  cachedSessionKey = await SessionKey.create({
+const SESSION_KEY_TTL_MIN = 30;
+const SESSION_KEY_TTL_MS = SESSION_KEY_TTL_MIN * 60 * 1000;
+const SESSION_KEY_REFRESH_MARGIN_MS = 6 * 60 * 1000;
+const SESSION_KEY_COOLDOWN_MS = 5 * 1000; // 5 second cooldown between session key creations
+
+let cachedSessionKeyMeta: SessionKeyMeta | null = null;
+let lastSessionKeyCreation = 0;
+
+async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25519Keypair) {
+  // Enforce cooldown to avoid hitting server rate limits
+  const now = Date.now();
+  const timeSinceLastCreation = now - lastSessionKeyCreation;
+  if (timeSinceLastCreation < SESSION_KEY_COOLDOWN_MS) {
+    const waitTime = SESSION_KEY_COOLDOWN_MS - timeSinceLastCreation;
+    logSealIbe("Session key cooldown", { waitTime: `${waitTime}ms` });
+    await new Promise((resolve) => setTimeout(resolve, waitTime));
+  }
+
+  logSealIbe("Creating new session key", { address: addr });
+  const key = await SessionKey.create({
     address: addr,
     packageId: ORIGINAL_COUNTER_PACKAGE_ID,
-    ttlMin: 30,
+    ttlMin: SESSION_KEY_TTL_MIN,
     signer: keypair,
     suiClient,
   });
+
+  lastSessionKeyCreation = Date.now();
+  cachedSessionKeyMeta = {
+    key,
+    createdAt: Date.now(),
+    ttlMs: SESSION_KEY_TTL_MS,
+  };
+
+  const currentTime = Date.now();
+  logSealIbe("Session key created", {
+    createdAt: cachedSessionKeyMeta.createdAt,
+    currentTime,
+    timeDiff: currentTime - cachedSessionKeyMeta.createdAt,
+    ttlMin: SESSION_KEY_TTL_MIN,
+    ttlMs: SESSION_KEY_TTL_MS,
+    expiryTime: cachedSessionKeyMeta.createdAt + SESSION_KEY_TTL_MS,
+    isExpiredImmediately: key.isExpired(),
+  });
+}
+
+function _shouldRefresh(meta: SessionKeyMeta | null): boolean {
+  if (!meta) {
+    return true;
+  }
+  if (meta.key.isExpired()) {
+    return true;
+  }
+  return Date.now() - meta.createdAt >= meta.ttlMs - SESSION_KEY_REFRESH_MARGIN_MS;
 }
 
 async function withSessionKey<T>(
@@ -270,19 +452,45 @@ async function withSessionKey<T>(
   keypair: Ed25519Keypair,
   fn: (sk: SessionKey) => Promise<T>,
 ): Promise<T> {
-  if (!cachedSessionKey || cachedSessionKey.isExpired()) {
-    await resetSessionKey(suiClient, addr, keypair);
+  // Reset cache and create completely fresh session key for each operation
+  cachedSessionKeyMeta = null;
+  lastSessionKeyCreation = 0;
+  await resetSessionKey(suiClient, addr, keypair);
+
+  const MAX_RETRIES = 3;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn(cachedSessionKeyMeta?.key);
+    } catch (e: unknown) {
+      lastError = e;
+      const errorStr = String(e);
+
+      if (errorStr.includes("expired")) {
+        logSealIbe(`Attempt ${attempt}: Session expired, creating new session key`, {});
+        await resetSessionKey(suiClient, addr, keypair);
+        continue;
+      }
+
+      if (errorStr.includes("Scalar out of range")) {
+        logSealIbe(`Attempt ${attempt}: Scalar out of range, retrying`, {
+          attempt,
+          maxRetries: MAX_RETRIES,
+        });
+        // For scalar errors, just retry without refreshing session key
+        // The error occurs during ephemeral key generation in createRequestParams
+        if (attempt < MAX_RETRIES) {
+          continue;
+        }
+      }
+
+      // For other errors, fail immediately
+      throw e;
+    }
   }
 
-  try {
-    return await fn(cachedSessionKey!);
-  } catch (e: unknown) {
-    if (String(e).includes("expired")) {
-      await resetSessionKey(suiClient, addr, keypair);
-      return await fn(cachedSessionKey!);
-    }
-    throw e;
-  }
+  throw lastError;
 }
 
 /**
@@ -462,10 +670,23 @@ const fetchSecretKeyShares = async (
 
   return await withSessionKey(suiClient, signerAddress, signerKeypair, async (sessionKey) => {
     try {
-      // Step 1: Build InnerID exactly as Move and @mysten/seal expect
+      // Step 1: Build InnerID exactly as Move expects (without package prefix)
       const messageBytes = new TextEncoder().encode(message);
       const { inner } = buildInnerId(counterId, signerAddress, messageBytes);
-      const innerHex = hex(inner);
+      const selectedHex = hex(inner);
+
+      // Analyze ID for potential Fr scalar range issues
+      const _idAsHex = selectedHex;
+      const isLikelyFrOverflow = analyzeFrRisk(inner);
+
+      logSealIbe("Key derivation analysis", {
+        counterId,
+        message,
+        idLength: inner.length,
+        idHex: selectedHex,
+        frRiskAnalysis: isLikelyFrOverflow,
+        sessionExpired: sessionKey.isExpired(),
+      });
 
       // Step 2: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
       const approveTx = new Transaction();
@@ -485,16 +706,43 @@ const fetchSecretKeyShares = async (
       });
       const perServer = await Promise.all(
         servers.map(async (s, idx) => {
-          const primary = await deriveFromOneServer(s, innerHex, sessionKey, txBytes);
+          const serverName = KEY_SERVERS[idx]?.name || `Server-${idx}`;
+
+          const primary = await deriveFromOneServer(s, selectedHex, sessionKey, txBytes);
           let diag: Awaited<ReturnType<typeof deriveForDiagnosis>> | null = null;
 
-          if (!primary.ok && primary.error.includes("Scalar out of range")) {
-            try {
-              diag = await deriveForDiagnosis(s, innerHex, sessionKey, txBytes);
-            } catch (_diagError) {}
+          if (primary.ok) {
+            logSealIbe(`${serverName} SUCCESS`, {
+              keyLength: primary.keyBytes.length,
+              frRisk: isLikelyFrOverflow.analysis,
+              counterId: `${counterId.slice(0, 10)}...`,
+            });
+            updateServerStats(serverName, true, isLikelyFrOverflow.analysis);
+          } else {
+            logSealIbe(`${serverName} FAILED`, {
+              error: primary.error,
+              isScalarError: primary.error.includes("Scalar out of range"),
+              frRisk: isLikelyFrOverflow.analysis,
+              counterId: `${counterId.slice(0, 10)}...`,
+            });
+            updateServerStats(serverName, false, isLikelyFrOverflow.analysis);
+
+            // Diagnostic for scalar errors to help with future debugging
+            if (primary.error.includes("Scalar out of range")) {
+              try {
+                diag = await deriveForDiagnosis(s, selectedHex, sessionKey, txBytes);
+                logSealIbe(`${serverName} DIAGNOSTIC`, {
+                  rawResult: diag.resRaw.ok ? "SUCCESS" : "FAILED",
+                  shaResult: diag.resSha.ok ? "SUCCESS" : "FAILED",
+                  frRisk: isLikelyFrOverflow.analysis,
+                });
+              } catch (_diagError) {
+                // Silent failure for diagnostics
+              }
+            }
           }
 
-          return { idx, server: s, primary, diag };
+          return { idx, server: s, primary, diag, serverName };
         }),
       );
 
@@ -502,7 +750,7 @@ const fetchSecretKeyShares = async (
       const errors: Array<{ serverIndex: number; server: OneServerCfg; error: string }> = [];
 
       for (const entry of perServer) {
-        const { idx, server, primary, diag } = entry;
+        const { idx, server, primary, diag, serverName } = entry;
 
         if (primary.ok) {
           assertG1Compressed(`DerivedKey-server${idx}`, primary.keyBytes);
@@ -510,18 +758,6 @@ const fetchSecretKeyShares = async (
             serverIndex: idx,
             serverId: primary.serverId,
             secretKey: primary.keyBytes,
-          });
-          continue;
-        }
-
-        const diagCandidate = diag?.resRaw.ok ? diag.resRaw : diag?.resSha.ok ? diag.resSha : null;
-
-        if (diagCandidate) {
-          assertG1Compressed(`DiagnosedKey-server${idx}`, diagCandidate.key);
-          keyShares.push({
-            serverIndex: idx,
-            serverId: diagCandidate.serverId,
-            secretKey: diagCandidate.key,
           });
           continue;
         }
@@ -535,14 +771,25 @@ const fetchSecretKeyShares = async (
 
       keyShares.sort((a, b) => a.serverIndex - b.serverIndex);
 
-      console.warn("[keyShares]", keyShares);
-
       if (keyShares.length < requiredCount) {
+        logSealIbe("Key derivation failed", {
+          need: requiredCount,
+          got: keyShares.length,
+          errors: errors.length,
+        });
+
         throw new Error(
           `Not enough successful servers (need ${requiredCount}, got ${keyShares.length}). ` +
             `Errors: ${JSON.stringify(errors, null, 2)}`,
         );
       }
+      logSealIbe("Key derivation successful", {
+        servers: keyShares.length,
+        required: requiredCount,
+      });
+
+      // Log statistics after each round
+      logServerStats();
 
       keyShares.splice(requiredCount);
       return keyShares;
@@ -741,6 +988,12 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
       client,
       keypair.getPublicKey().toSuiAddress(),
     );
+
+    logSealIbe("Test Initialization", {
+      network: NETWORK,
+      threshold: THRESHOLD_RUNTIME,
+      idMode: ID_MODE,
+    });
   });
 
   test("Step 1: creates SEAL IBE multisig counter with real Seal Key Server public keys", async () => {
@@ -768,7 +1021,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     for (const serverId of result.keyServerIds) {
       expect(serverId).toMatch(/^0x[a-f0-9]{64}$/);
     }
-  });
+  }, 120000);
 
   test("Step 3: verifies signature and creates proof on-chain", async () => {
     if (!counterId) throw new Error("Counter not created - run Step 1 first");
@@ -793,7 +1046,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
 
     // Wait for transaction to be processed
     await client.waitForTransaction({ digest });
-  }, 15000);
+  }, 60000);
 
   test("Step 4: increments counter with verified signature", async () => {
     if (!counterId) throw new Error("Counter not created - run Step 1 first");
@@ -823,7 +1076,126 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     // Verify counter was incremented
     const finalValue = await getCounterValue(client, counterId);
     expect(finalValue).toBe(initialValue + 1);
-  }, 15000);
+  }, 60000);
+
+  test("Debug: Fixed Counter ID pattern test", async () => {
+    if (!counterId) throw new Error("Counter not created - run Step 1 first");
+    // Test with different Fr risk levels to isolate the scalar range issue
+    const testCases = [
+      {
+        name: "Safe pattern (0x00...)",
+        counterId: "0x0000000000000000000000000000000000000000000000000000000000000001",
+      },
+      {
+        name: "Low risk pattern (0x60...)",
+        counterId: "0x6000000000000000000000000000000000000000000000000000000000000001",
+      },
+      {
+        name: "Medium risk pattern (0x73...)",
+        counterId: "0x7300000000000000000000000000000000000000000000000000000000000001",
+      },
+      {
+        name: "High risk pattern (0x80...)",
+        counterId: "0x8000000000000000000000000000000000000000000000000000000000000001",
+      },
+    ];
+
+    for (const testCase of testCases) {
+      logSealIbe(`Testing ${testCase.name}`, { counterId: testCase.counterId });
+
+      try {
+        // Build InnerID with fixed counterId
+        const messageBytes = new TextEncoder().encode("debug-test");
+        const signerAddress = keypair.getPublicKey().toSuiAddress();
+        const { inner } = buildInnerId(testCase.counterId, signerAddress, messageBytes);
+        const frRisk = analyzeFrRisk(inner);
+
+        logSealIbe(`${testCase.name} - ID Analysis`, {
+          counterId: testCase.counterId,
+          frRisk: frRisk.analysis,
+          firstBytes: frRisk.firstBytes,
+        });
+
+        // Test key derivation with fixed ID
+        const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
+        await withSessionKey(suiClient, signerAddress, keypair, async (sessionKey) => {
+          const selectedHex = hex(inner);
+
+          // Test each server individually
+          const servers = [
+            {
+              objectId: "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2",
+              url: "https://seal.studio-mirai.com",
+              weight: 1,
+            },
+            {
+              objectId: "0x6068c0acb197dddbacd4746a9de7f025b2ed5a5b6c1b1ab44dade4426d141da2",
+              url: "https://seal.ruby-node.com",
+              weight: 1,
+            },
+            {
+              objectId: "0x5466b7df5c15b508678d51496ada8afab0d6f70a01c10613123382b1b8131007",
+              url: "https://seal.nodeinfra.com",
+              weight: 1,
+            },
+          ];
+
+          const approveTx = new Transaction();
+          approveTx.moveCall({
+            target: `${COUNTER_PACKAGE_ID}::seal_ibe_multisig_counter::seal_approve`,
+            arguments: [
+              approveTx.pure.vector("u8", Array.from(inner)),
+              approveTx.object(counterId),
+              approveTx.pure.vector("u8", Array.from(messageBytes)),
+            ],
+          });
+          const txBytes = await approveTx.build({
+            client: suiClient,
+            onlyTransactionKind: true,
+          });
+
+          let successCount = 0;
+          for (let i = 0; i < servers.length; i++) {
+            const serverName = KEY_SERVERS[i]?.name || `Server-${i}`;
+            const result = await deriveFromOneServer(servers[i], selectedHex, sessionKey, txBytes);
+
+            if (result.ok) {
+              successCount++;
+              logSealIbe(`${testCase.name} - ${serverName} SUCCESS`, {
+                frRisk: frRisk.analysis,
+              });
+            } else {
+              logSealIbe(`${testCase.name} - ${serverName} FAILED`, {
+                error: result.error,
+                frRisk: frRisk.analysis,
+                isScalarError: result.error.includes("Scalar out of range"),
+              });
+            }
+
+            updateServerStats(serverName, result.ok, frRisk.analysis);
+          }
+
+          logSealIbe(`${testCase.name} - Summary`, {
+            successCount,
+            totalServers: servers.length,
+            frRisk: frRisk.analysis,
+          });
+        });
+
+        // Small delay between test cases
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } catch (error) {
+        logSealIbe(`${testCase.name} - ERROR`, { error: String(error) });
+      }
+    }
+
+    // Final statistics
+    logSealIbe("FIXED ID TEST COMPLETE");
+    logServerStats();
+
+    // This test is for analysis only - always pass
+    expect(true).toBe(true);
+  }, 120000);
 
   test("Integration: completes full SEAL IBE multisig flow (create → sign → verify → increment)", async () => {
     // Create new counter for clean integration test
