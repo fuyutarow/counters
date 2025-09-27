@@ -248,34 +248,41 @@ async function deriveForDiagnosis(
 /**
  * Session key wrapper with automatic retry on expiration
  */
+let cachedSessionKey: SessionKey | null = null;
+
+async function resetSessionKey(
+  suiClient: SuiClient,
+  addr: string,
+  keypair: Ed25519Keypair,
+) {
+  cachedSessionKey = await SessionKey.create({
+    address: addr,
+    packageId: ORIGINAL_COUNTER_PACKAGE_ID,
+    ttlMin: 30,
+    signer: keypair,
+    suiClient,
+  });
+}
+
 async function withSessionKey<T>(
   suiClient: SuiClient,
   addr: string,
   keypair: Ed25519Keypair,
   fn: (sk: SessionKey) => Promise<T>,
 ): Promise<T> {
-  const newSK = () =>
-    SessionKey.create({
-      address: addr,
-      packageId: ORIGINAL_COUNTER_PACKAGE_ID,
-      ttlMin: 30,
-      signer: keypair,
-      suiClient,
-    });
-
-  let attempt = 0;
-  while (attempt < 3) {
-    const sk = await newSK();
-    try {
-      return await fn(sk);
-    } catch (e: unknown) {
-      if (!String(e).includes("expired")) {
-        throw e;
-      }
-      attempt++;
-    }
+  if (!cachedSessionKey || cachedSessionKey.isExpired()) {
+    await resetSessionKey(suiClient, addr, keypair);
   }
-  throw new Error("Session key has expired repeatedly");
+
+  try {
+    return await fn(cachedSessionKey!);
+  } catch (e: unknown) {
+    if (String(e).includes("expired")) {
+      await resetSessionKey(suiClient, addr, keypair);
+      return await fn(cachedSessionKey!);
+    }
+    throw e;
+  }
 }
 
 /**
@@ -478,16 +485,8 @@ const fetchSecretKeyShares = async (
       });
       const perServer = await Promise.all(
         servers.map(async (s, idx) => {
-          let primary = await deriveFromOneServer(s, innerHex, sessionKey, txBytes);
+          const primary = await deriveFromOneServer(s, innerHex, sessionKey, txBytes);
           let diag: Awaited<ReturnType<typeof deriveForDiagnosis>> | null = null;
-
-          if (!primary.ok) {
-            for (let retry = 0; retry < 2; retry++) {
-              await new Promise((resolve) => setTimeout(resolve, 200));
-              primary = await deriveFromOneServer(s, innerHex, sessionKey, txBytes);
-              if (primary.ok) break;
-            }
-          }
 
           if (!primary.ok && primary.error.includes("Scalar out of range")) {
             try {
