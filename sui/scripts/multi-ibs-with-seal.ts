@@ -74,7 +74,7 @@ const THRESHOLD = 2; // 2-of-3 threshold
  * - Object IDs are publicly known, but master keys are kept secret
  * - Each server independently computes sk_ID_i for given identity ID
  */
-const KEY_SERVERS = [
+const _KEY_SERVERS = [
   {
     name: "Studio Mirai",
     objectId: "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2",
@@ -173,20 +173,16 @@ class SealMultiIBSAggregator {
 
       // Convert counter ID to bytes (same as Move object::id().to_bytes())
       // Move's object::id().to_bytes() returns raw 32-byte array from hex string
-      const counterIdBytes = Array.from(
-        Buffer.from(counterId.replace('0x', ''), 'hex')
-      );
+      const counterIdBytes = Array.from(Buffer.from(counterId.replace("0x", ""), "hex"));
 
       // Convert signer address to bytes (same as Move bcs::to_bytes(&address))
-      const signerBytes = Array.from(
-        Buffer.from(signerAddress.replace('0x', ''), 'hex')
-      );
+      const signerBytes = Array.from(Buffer.from(signerAddress.replace("0x", ""), "hex"));
 
       // Concatenate: counter_id || signer_address (matching Move implementation)
       const innerIdBytes = [...counterIdBytes, ...signerBytes];
 
       // Convert to hex string for fetchKeys ids parameter
-      const innerIdHex = `0x${Buffer.from(innerIdBytes).toString('hex')}`;
+      const innerIdHex = `0x${Buffer.from(innerIdBytes).toString("hex")}`;
 
       // Step 2: Create SessionKey FIRST (following dpp-pilot pattern)
       const sessionKey = await SessionKey.create({
@@ -200,11 +196,8 @@ class SealMultiIBSAggregator {
       // Step 3: Build and execute seal_approve transaction
       const approveTx = new Transaction();
       approveTx.moveCall({
-        target: `${COUNTER_PACKAGE_ID}::multi_ibs_counter::seal_approve_multi_ibs`,
-        arguments: [
-          approveTx.pure.vector("u8", innerIdBytes),
-          approveTx.object(counterId),
-        ],
+        target: `${COUNTER_PACKAGE_ID}::multi_ibs_counter::seal_approve`,
+        arguments: [approveTx.pure.vector("u8", innerIdBytes), approveTx.object(counterId)],
       });
 
       // Execute the seal_approve transaction first
@@ -213,7 +206,7 @@ class SealMultiIBSAggregator {
         transaction: approveTx,
         options: {
           showEffects: true,
-          requestType: "WaitForLocalExecution"
+          requestType: "WaitForLocalExecution",
         },
       });
 
@@ -223,28 +216,25 @@ class SealMultiIBSAggregator {
       }
 
       // Small delay to ensure transaction is indexed
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // Build the same transaction for txBytes (required by fetchKeys)
       const txBytes = await approveTx.build({
         client: this.suiClient,
-        onlyTransactionKind: true
+        onlyTransactionKind: true,
       });
 
       // Step 4: Get IBE derived keys from Key Servers using getDerivedKeys
       // getDerivedKeys returns Map<string, G1Element> where key is server objectId
       const derivedKeys = await this.sealClient.getDerivedKeys({
-        id: innerIdHex,  // Use hex-encoded InnerID
+        id: innerIdHex, // Use hex-encoded InnerID
         sessionKey,
         txBytes,
         threshold: requiredCount,
       });
 
-      console.log("getDerivedKeys result:", derivedKeys);
-      console.log("getDerivedKeys type:", typeof derivedKeys);
-
       // Check if derivedKeys is a Map
-      if (!derivedKeys || typeof derivedKeys.size !== 'number') {
+      if (!derivedKeys || typeof derivedKeys.size !== "number") {
         throw new Error(`getDerivedKeys returned unexpected result: ${derivedKeys}`);
       }
 
@@ -263,25 +253,13 @@ class SealMultiIBSAggregator {
 
       return keyShares;
     } catch (error) {
-      console.error("Seal Key Server fetch failed:", error);
-
       // Provide more specific error context
       if (error.message?.includes("notExists")) {
-        console.error("Object reference error - possible SessionKey or transaction object issue");
       } else if (error.message?.includes("NoAccess")) {
-        console.error("Key Server access denied - seal_approve transaction may not have been properly executed or recognized");
       }
 
       throw new Error(`Real Key Server integration failed: ${error}. Mock fallback is forbidden.`);
     }
-  }
-
-  /**
-   * REMOVED: No mock implementations allowed.
-   * Real Key Server integration only.
-   */
-  private generateMockKeyShares(_identity: string, _count: number): KeyShare[] {
-    throw new Error("Mock key shares are forbidden. Use real Key Server integration only.");
   }
 
   /**
@@ -390,6 +368,29 @@ class SealMultiIBSAggregator {
     }
 
     return result.digest;
+  }
+
+  /**
+   * Get aggregated public key from Key Servers using Seal SDK
+   * @param keyServerIds Array of Key Server object IDs to fetch public keys from
+   */
+  async getAggregatedPublicKey(keyServerIds: string[]): Promise<Uint8Array> {
+    try {
+      // Get public keys from Seal Key Servers
+      const publicKeys = await this.sealClient.getPublicKeys(keyServerIds);
+
+      // Aggregate G2 public keys using curve point addition
+      let aggregatedPK = bls12_381.G2.Point.ZERO; // Identity element (neutral element for addition)
+
+      for (const publicKey of publicKeys) {
+        // Convert each public key to G2 point and add to aggregate
+        const g2Point = bls12_381.G2.Point.fromBytes(publicKey.toBytes());
+        aggregatedPK = aggregatedPK.add(g2Point);
+      }
+      return aggregatedPK.toBytes(); // Return as 96-byte compressed G2 point
+    } catch (error) {
+      throw new Error(`Failed to aggregate public keys: ${error}`);
+    }
   }
 
   /**
