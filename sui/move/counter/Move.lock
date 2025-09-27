@@ -7,7 +7,7 @@ version = 4
 [pinned.testnet.Counter]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "7D0FAD07BD0142F328D44FED4F8004BD3A0596BA06A124DDB274E5AA83E142F9"
+manifest_digest = "BF2B97B506492C79D35ACC00FD903E6551D537B8462DC7AA43CD71F45CFF5B28"
 deps = { seal = "seal", std = "MoveStdlib_1", sui = "Sui_1" }
 
 [pinned.testnet.MoveStdlib]
@@ -35,7 +35,7 @@ manifest_digest = "ED5DEFBBF556EE89312E639A53F21DE24320F9B13C2087D3BFE2989D5B2B5
 deps = { MoveStdlib = "MoveStdlib_1" }
 
 [pinned.testnet.seal]
-source = { local = "../../../MYSTENLABS/seal/move/seal" }
+source = { local = "../seal" }
 use_environment = "testnet"
 manifest_digest = "0285063FA4C73010C325589AE76E079BAA1D73EE678B94EBA4DC1367EC632426"
 deps = { Sui = "Sui" }

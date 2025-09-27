@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[test_only]
-module counter::multi_ibs_counter_test;
+module counter::bls_multisig_counter_test;
 
-use counter::multi_ibs_counter::{Self, MultiIBSCounter};
+use counter::bls_multisig_counter::{Self, BlsMultisigCounter};
 use sui::test_scenario::{Self as ts, Scenario, next_tx, ctx};
 
 // Test addresses
@@ -127,7 +127,7 @@ fun test_share_counter() {
 
     next_tx(&mut scenario, ADMIN);
     {
-        multi_ibs_counter::share(
+        bls_multisig_counter::share(
             key_server_ids,
             seal_shard_pubkeys,
             threshold,
@@ -137,12 +137,12 @@ fun test_share_counter() {
 
     next_tx(&mut scenario, ADMIN);
     {
-        let counter = ts::take_shared<MultiIBSCounter>(&scenario);
+        let counter = ts::take_shared<BlsMultisigCounter>(&scenario);
 
         // Verify counter properties
-        assert!(multi_ibs_counter::threshold(&counter) == 2, 0);
-        assert!(multi_ibs_counter::seal_shard_count(&counter) == 3, 0);
-        assert!(multi_ibs_counter::value(&counter) == 0, 0);
+        assert!(bls_multisig_counter::threshold(&counter) == 2, 0);
+        assert!(bls_multisig_counter::seal_shard_count(&counter) == 3, 0);
+        assert!(bls_multisig_counter::value(&counter) == 0, 0);
 
         ts::return_shared(counter);
     };
@@ -159,21 +159,21 @@ fun test_basic_verification() {
 
     next_tx(&mut scenario, USER);
     {
-        let counter = ts::take_shared<MultiIBSCounter>(&scenario);
+        let counter = ts::take_shared<BlsMultisigCounter>(&scenario);
 
         // Create mock signature data
         let _signature_g1_bytes =
             x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"; // dummy signature
         let _message = b"test message";
 
-        let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
+        let aggregated_key = bls_multisig_counter::new_bls_aggregated_pk(
             &counter,
             ctx(&mut scenario),
         );
         // Note: In practice, you would need to add key servers to the aggregated key first
 
         ts::return_shared(counter);
-        multi_ibs_counter::destroy_aggregated_public_key(aggregated_key);
+        bls_multisig_counter::destroy_bls_aggregated_pk(aggregated_key);
     };
 
     ts::end(scenario);
@@ -181,7 +181,7 @@ fun test_basic_verification() {
 
 /// Test insufficient signatures (should fail when below threshold)
 #[test]
-#[expected_failure(abort_code = multi_ibs_counter::EInsufficientSignatures)]
+#[expected_failure(abort_code = bls_multisig_counter::EInsufficientSignatures)]
 fun test_insufficient_signatures() {
     let mut scenario = ts::begin(ADMIN);
 
@@ -189,19 +189,19 @@ fun test_insufficient_signatures() {
 
     next_tx(&mut scenario, USER);
     {
-        let counter = ts::take_shared<MultiIBSCounter>(&scenario);
+        let counter = ts::take_shared<BlsMultisigCounter>(&scenario);
 
         // Create mock signature data (aggregated key will have 0 key servers, threshold is 2)
         let signature_g1_bytes =
             x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
         let message = b"test message";
 
-        let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
+        let aggregated_key = bls_multisig_counter::new_bls_aggregated_pk(
             &counter,
             ctx(&mut scenario),
         );
 
-        let _proof = multi_ibs_counter::verify_and_create_proof(
+        let _proof = bls_multisig_counter::verify_and_create_proof(
             &counter,
             &aggregated_key,
             signature_g1_bytes,
@@ -209,8 +209,8 @@ fun test_insufficient_signatures() {
             ctx(&mut scenario),
         );
 
-        multi_ibs_counter::destroy_aggregated_public_key(aggregated_key);
-        multi_ibs_counter::test_destroy_proof(_proof);
+        bls_multisig_counter::destroy_bls_aggregated_pk(aggregated_key);
+        bls_multisig_counter::test_destroy_proof(_proof);
 
         ts::return_shared(counter);
     };
@@ -229,14 +229,14 @@ fun test_counter_increment_with_mock_proof() {
 
     next_tx(&mut scenario, USER);
     {
-        let counter = ts::take_shared<MultiIBSCounter>(&scenario);
+        let counter = ts::take_shared<BlsMultisigCounter>(&scenario);
 
         // Create mock signature data for testing
         let _signature_g1_bytes =
             x"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
         let _message = b"test message";
 
-        let aggregated_key = multi_ibs_counter::new_aggregated_public_key(
+        let aggregated_key = bls_multisig_counter::new_bls_aggregated_pk(
             &counter,
             ctx(&mut scenario),
         );
@@ -245,10 +245,10 @@ fun test_counter_increment_with_mock_proof() {
         // Note: Actual proof creation would require proper BLS signature verification
         // This test focuses on the counter mechanics assuming valid proofs can be created
 
-        multi_ibs_counter::destroy_aggregated_public_key(aggregated_key);
+        bls_multisig_counter::destroy_bls_aggregated_pk(aggregated_key);
 
         // Verify initial value remains 0 (no increment without valid proof)
-        assert!(multi_ibs_counter::value(&counter) == 0, 0);
+        assert!(bls_multisig_counter::value(&counter) == 0, 0);
 
         ts::return_shared(counter);
     };
@@ -369,7 +369,7 @@ fun setup_config_and_counter(scenario: &mut Scenario) {
         ];
         let seal_shard_pubkeys = vector[mock_pubkey, mock_pubkey, mock_pubkey];
 
-        multi_ibs_counter::share(
+        bls_multisig_counter::share(
             key_server_ids,
             seal_shard_pubkeys,
             2, // 2-of-3 threshold
