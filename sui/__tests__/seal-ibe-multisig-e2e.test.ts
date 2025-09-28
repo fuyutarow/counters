@@ -21,7 +21,7 @@ import { consola } from "consola";
 import {
   counterPackage,
   type Key_serverKeyServerV1Type,
-  type Seal_ibe_multisig_counterSealIbeMultisigCounterType,
+  parseSeal_ibe_multisig_counterSealIbeMultisigCounter,
 } from "@/abi";
 import { getKeypair } from "./utils/keybook.js";
 
@@ -69,6 +69,19 @@ class ExpiredSessionError extends Error {
   }
 }
 
+// Improved type definitions
+type DeriveResult =
+  | { ok: true; serverId: string; keyBytes: Uint8Array }
+  | { ok: false; error: string };
+
+type FrRiskLevel = "safe" | "low_risk" | "medium_risk" | "high_risk";
+
+type FrRiskAnalysis = {
+  likelyOverflow: boolean;
+  firstBytes: string;
+  analysis: FrRiskLevel;
+};
+
 interface KeyShare {
   serverIndex: number;
   serverId: string;
@@ -89,12 +102,7 @@ interface ServerStats {
     total: number;
     successes: number;
     failures: number;
-    byFrRisk: {
-      safe: { successes: number; failures: number };
-      low_risk: { successes: number; failures: number };
-      medium_risk: { successes: number; failures: number };
-      high_risk: { successes: number; failures: number };
-    };
+    byFrRisk: Record<FrRiskLevel, { successes: number; failures: number }>;
   };
 }
 
@@ -127,11 +135,7 @@ function hexTo32Bytes(hexStr: string): Uint8Array {
  * Analyze if ID might cause Fr scalar range overflow
  * BLS12-381 Fr modulus: 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
  */
-function analyzeFrRisk(idBytes: Uint8Array): {
-  likelyOverflow: boolean;
-  firstBytes: string;
-  analysis: string;
-} {
+function analyzeFrRisk(idBytes: Uint8Array): FrRiskAnalysis {
   // Check if first 32 bytes (counterId) have high values that might cause overflow
   const first32 = idBytes.slice(0, 32);
   const firstBytesHex = Buffer.from(first32).toString("hex");
@@ -140,10 +144,12 @@ function analyzeFrRisk(idBytes: Uint8Array): {
   const firstByte = first32[0];
   const likelyOverflow = firstByte >= 0x73;
 
-  let analysis = "safe";
-  if (firstByte >= 0x80) analysis = "high_risk";
-  else if (firstByte >= 0x73) analysis = "medium_risk";
-  else if (firstByte >= 0x60) analysis = "low_risk";
+  const analysis: FrRiskLevel = (() => {
+    if (firstByte >= 0x80) return "high_risk";
+    if (firstByte >= 0x73) return "medium_risk";
+    if (firstByte >= 0x60) return "low_risk";
+    return "safe";
+  })();
 
   return {
     likelyOverflow,
@@ -190,7 +196,7 @@ export function buildInnerId(
 
 const serverStats: ServerStats = {};
 
-function updateServerStats(serverName: string, success: boolean, frRisk: string) {
+function updateServerStats(serverName: string, success: boolean, frRisk: FrRiskLevel) {
   if (!serverStats[serverName]) {
     serverStats[serverName] = {
       total: 0,
@@ -210,10 +216,10 @@ function updateServerStats(serverName: string, success: boolean, frRisk: string)
 
   if (success) {
     stats.successes++;
-    stats.byFrRisk[frRisk as keyof typeof stats.byFrRisk].successes++;
+    stats.byFrRisk[frRisk].successes++;
   } else {
     stats.failures++;
-    stats.byFrRisk[frRisk as keyof typeof stats.byFrRisk].failures++;
+    stats.byFrRisk[frRisk].failures++;
   }
 }
 
@@ -242,7 +248,7 @@ function clearSessionKeyCache() {
 async function resetSessionKey(suiClient: SuiClient, addr: string, keypair: Ed25519Keypair) {
   // Enforce cooldown to avoid hitting server rate limits
   const now = Date.now();
-  const lastCreation = lastSessionKeyCreationByAddress.get(addr) || 0;
+  const lastCreation = lastSessionKeyCreationByAddress.get(addr) ?? 0;
   const timeSinceLastCreation = now - lastCreation;
   if (timeSinceLastCreation < SESSION_KEY_COOLDOWN_MS) {
     const waitTime = SESSION_KEY_COOLDOWN_MS - timeSinceLastCreation;
@@ -369,7 +375,7 @@ async function deriveFromOneServer(
   idHex: `0x${string}`,
   sessionKey: SessionKey,
   txBytes: Uint8Array,
-): Promise<{ ok: true; serverId: string; keyBytes: Uint8Array } | { ok: false; error: string }> {
+): Promise<DeriveResult> {
   const one = new SealClient({
     networkConfig: NETWORK,
     suiClient: new SuiClient({ url: getFullnodeUrl(NETWORK) }),
@@ -386,7 +392,7 @@ async function deriveFromOneServer(
       const [entry] = [...m.entries()];
       if (!entry) throw new Error("No key returned");
       const [serverId, derivedKey] = entry;
-      return { ok: true as const, serverId, keyBytes: derivedKey.key.toBytes() };
+      return { ok: true, serverId, keyBytes: derivedKey.key.toBytes() } satisfies DeriveResult;
     } catch (e: unknown) {
       lastError = e;
       const errorStr = String(e);
@@ -394,7 +400,7 @@ async function deriveFromOneServer(
       if (errorStr.includes("Scalar out of range")) {
         if (attempt < MAX_RETRIES) {
           logSealIbe(
-            `${server.name || server.url} Scalar error retry ${attempt}/${MAX_RETRIES}`,
+            `${server.name ?? server.url} Scalar error retry ${attempt}/${MAX_RETRIES}`,
             {},
           );
           continue;
@@ -404,7 +410,7 @@ async function deriveFromOneServer(
       // For other errors, fail immediately
       const errorDetails =
         e instanceof Error ? `${e.name}: ${e.message}\nStack: ${e.stack}` : String(e);
-      return { ok: false as const, error: errorDetails };
+      return { ok: false, error: errorDetails } satisfies DeriveResult;
     }
   }
 
@@ -413,7 +419,7 @@ async function deriveFromOneServer(
     lastError instanceof Error
       ? `${lastError.name}: ${lastError.message}\nStack: ${lastError.stack}`
       : String(lastError);
-  return { ok: false as const, error: errorDetails };
+  return { ok: false, error: errorDetails } satisfies DeriveResult;
 }
 
 /**
@@ -451,7 +457,7 @@ const fetchSecretKeyShares = async (
     // Step 1: Build InnerID exactly as Move expects (without package prefix)
     const messageBytes = new TextEncoder().encode(message);
     const { inner } = buildInnerId(counterId, signerAddress, messageBytes);
-    const selectedHex = toHex(inner) as `0x${string}`;
+    const selectedHex = toHex(inner) satisfies `0x${string}`;
 
     // Analyze ID for potential Fr scalar range issues
     const isLikelyFrOverflow = analyzeFrRisk(inner);
@@ -482,7 +488,7 @@ const fetchSecretKeyShares = async (
     });
     const perServer = await Promise.all(
       servers.map(async (s, idx) => {
-        const serverName = KEY_SERVERS[idx]?.name || `Server-${idx}`;
+        const serverName = KEY_SERVERS[idx]?.name ?? `Server-${idx}`;
 
         const primary = await deriveFromOneServer(s, selectedHex, sessionKey, txBytes);
 
@@ -660,9 +666,12 @@ const getCounterValue = async (client: SuiClient, counterId: string): Promise<nu
     throw new Error(`Invalid counter object: ${counterId}`);
   }
 
-  const fields = counterObject.data.content
-    .fields as Seal_ibe_multisig_counterSealIbeMultisigCounterType;
-  return Number(fields.value);
+  const content = counterObject.data.content;
+  const parsedFields = parseSeal_ibe_multisig_counterSealIbeMultisigCounter(content.fields);
+  if (!parsedFields) {
+    throw new Error(`Failed to parse counter fields: ${counterId}`);
+  }
+  return Number(parsedFields.value);
 };
 
 /**
@@ -714,9 +723,24 @@ const getRealSealShardPublicKeys = async (
       }
 
       // Extract pk following the ABI-defined structure
-      const v1Fields = v1Content.fields as { value?: { fields?: Key_serverKeyServerV1Type } };
-      const keyServerV1 = v1Fields?.value?.fields;
-      const pkField = keyServerV1?.pk;
+      const v1Fields = v1Content.fields;
+      if (!v1Fields || typeof v1Fields !== "object" || !("value" in v1Fields)) {
+        throw new Error(`Invalid v1Fields structure in ${v1Field.objectId}`);
+      }
+
+      const v1FieldsWithValue = v1Fields as Record<string, unknown>;
+      if (!("value" in v1FieldsWithValue)) {
+        throw new Error(`Missing value field in ${v1Field.objectId}`);
+      }
+
+      const valueField = v1FieldsWithValue.value;
+      if (!valueField || typeof valueField !== "object" || !("fields" in valueField)) {
+        throw new Error(`Invalid value field structure in ${v1Field.objectId}`);
+      }
+
+      const fieldsObject = valueField as { fields: unknown };
+      const keyServerV1 = fieldsObject.fields as Key_serverKeyServerV1Type;
+      const pkField = keyServerV1.pk;
 
       if (!pkField) {
         throw new Error(`No pk field found in KeyServerV1 object: ${v1Field.objectId}`);
@@ -1003,7 +1027,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
         // Test key derivation with fixed ID
         const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
         await withSessionKey(suiClient, signerAddress, keypair, async (sessionKey) => {
-          const selectedHex = toHex(inner) as `0x${string}`;
+          const selectedHex = toHex(inner) satisfies `0x${string}`;
 
           // Test each server individually
           const servers = [
@@ -1039,7 +1063,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
 
           let successCount = 0;
           for (let i = 0; i < servers.length; i++) {
-            const serverName = KEY_SERVERS[i]?.name || `Server-${i}`;
+            const serverName = KEY_SERVERS[i]?.name ?? `Server-${i}`;
             const result = await deriveFromOneServer(servers[i], selectedHex, sessionKey, txBytes);
 
             if (result.ok) {
