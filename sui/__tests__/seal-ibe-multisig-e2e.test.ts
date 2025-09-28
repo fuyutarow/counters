@@ -31,13 +31,6 @@ const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
   : THRESHOLD;
 const COUNTER_PACKAGE_ID = counterPackage.packageId;
 
-/**
- * ID construction mode - confirmed through Phase 0 systematic debugging
- * Using "inner" only (counterId || signerAddr || domain || message)
- * Package ID prefix causes "Scalar out of range" errors in Key Servers
- */
-const ID_MODE = "inner" as const;
-
 // Session management constants
 const SESSION_KEY_TTL_MIN = 30;
 const SESSION_KEY_TTL_MS = SESSION_KEY_TTL_MIN * 60 * 1000;
@@ -77,12 +70,6 @@ interface KeyShare {
   secretKey: Uint8Array; // sk_ID_i as G1Element bytes
 }
 
-interface BlsMultisigSignature {
-  signature: Uint8Array; // G1 signature (48 bytes)
-  message: Uint8Array;
-  identity: string;
-}
-
 type OneServerCfg = { objectId: string; url: string; weight: number };
 
 type SessionKeyMeta = {
@@ -109,9 +96,6 @@ interface ServerStats {
 // ================================
 // UTILITY FUNCTIONS
 // ================================
-
-// BLS signature utilities
-const _blss = bls12_381.shortSignatures;
 
 /**
  * Enhanced logging for debugging instability
@@ -199,28 +183,6 @@ export function buildInnerId(
   const messageWithDomain = new Uint8Array([...DOMAIN, ...msg]);
   const inner = new Uint8Array([...counter, ...signer, ...messageWithDomain]);
   return { inner, messageWithDomain };
-}
-
-/**
- * Build FullID matching SEAL SDK createFullId function
- */
-export function buildFullId(packageId: string, innerId: Uint8Array): Uint8Array {
-  const pkg = hexTo32Bytes(packageId);
-  const full = new Uint8Array([...pkg, ...innerId]);
-  return full;
-}
-
-/**
- * Build H1 input for SEAL IBE matching Move implementation
- */
-export function buildH1InputForSealIBE(
-  packageId: string,
-  innerId: Uint8Array,
-): { full: Uint8Array; h1in: Uint8Array } {
-  const DST = new TextEncoder().encode("SUI-SEAL-IBE-BLS12381-00");
-  const full = buildFullId(packageId, innerId);
-  const h1in = new Uint8Array([...DST, ...full]);
-  return { full, h1in };
 }
 
 // ================================
@@ -456,50 +418,6 @@ async function deriveFromOneServer(
 }
 
 /**
- * Diagnostic function to determine server implementation type
- */
-async function deriveForDiagnosis(
-  server: OneServerCfg,
-  idHex: `0x${string}`,
-  sessionKey: SessionKey,
-  txBytes: Uint8Array,
-): Promise<{
-  resRaw: { ok: true; serverId: string; key: Uint8Array } | { ok: false; error: string };
-  resSha: { ok: true; serverId: string; key: Uint8Array } | { ok: false; error: string };
-}> {
-  const client = new SealClient({
-    networkConfig: NETWORK,
-    suiClient: new SuiClient({ url: getFullnodeUrl(NETWORK) }),
-    serverConfigs: [server],
-  });
-
-  // Create 32B SHA256 hash for diagnosis (NOT used in verification)
-  const inner = Buffer.from(idHex.slice(2), "hex");
-  const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", inner));
-  const shaHex = `0x${Buffer.from(sha).toString("hex")}` as const;
-
-  const tryOnce = async (idHex: `0x${string}`) => {
-    try {
-      const m = await client.getDerivedKeys({ id: idHex, sessionKey, txBytes, threshold: 1 });
-      const [entry] = [...m.entries()];
-      if (!entry) throw new Error("No key returned");
-      const [serverId, derivedKey] = entry;
-      return { ok: true as const, serverId, key: derivedKey.key.toBytes() };
-    } catch (e: unknown) {
-      // Detailed error information for debugging
-      const errorDetails =
-        e instanceof Error ? `${e.name}: ${e.message}\nStack: ${e.stack}` : String(e);
-      return { ok: false as const, error: errorDetails };
-    }
-  };
-
-  const resRaw = await tryOnce(idHex);
-  const resSha = await tryOnce(shaHex);
-
-  return { resRaw, resSha };
-}
-
-/**
  * Fetch IBE key shares from Seal Key Servers with debugging and failover
  */
 const fetchSecretKeyShares = async (
@@ -531,147 +449,148 @@ const fetchSecretKeyShares = async (
   ];
 
   return await withSessionKey(suiClient, signerAddress, signerKeypair, async (sessionKey) => {
-    try {
-      // Step 1: Build InnerID exactly as Move expects (without package prefix)
-      const messageBytes = new TextEncoder().encode(message);
-      const { inner } = buildInnerId(counterId, signerAddress, messageBytes);
-      const selectedHex = hex(inner);
+    // Step 1: Build InnerID exactly as Move expects (without package prefix)
+    const messageBytes = new TextEncoder().encode(message);
+    const { inner } = buildInnerId(counterId, signerAddress, messageBytes);
+    const selectedHex = hex(inner);
 
-      // Analyze ID for potential Fr scalar range issues
-      const _idAsHex = selectedHex;
-      const isLikelyFrOverflow = analyzeFrRisk(inner);
+    // Analyze ID for potential Fr scalar range issues
+    const isLikelyFrOverflow = analyzeFrRisk(inner);
 
-      logSealIbe("Key derivation analysis", {
-        counterId,
-        message,
-        idLength: inner.length,
-        idHex: selectedHex,
-        frRiskAnalysis: isLikelyFrOverflow,
-        sessionExpired: sessionKey.isExpired(),
-      });
+    logSealIbe("Key derivation analysis", {
+      counterId,
+      message,
+      idLength: inner.length,
+      idHex: selectedHex,
+      frRiskAnalysis: isLikelyFrOverflow,
+      sessionExpired: sessionKey.isExpired(),
+    });
 
-      // Step 2: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
-      const approveTx = new Transaction();
-      counterPackage.seal_ibe_multisig_counter.seal_approve(approveTx, {
-        arguments: [
-          approveTx.pure.vector("u8", Array.from(inner)),
-          approveTx.object(counterId),
-          approveTx.pure.vector("u8", Array.from(messageBytes)),
-        ],
-      });
+    // Step 2: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
+    const approveTx = new Transaction();
+    counterPackage.seal_ibe_multisig_counter.seal_approve(approveTx, {
+      arguments: [
+        approveTx.pure.vector("u8", Array.from(inner)),
+        approveTx.object(counterId),
+        approveTx.pure.vector("u8", Array.from(messageBytes)),
+      ],
+    });
 
-      // Generate txBytes without executing the transaction
-      const txBytes = await approveTx.build({
-        client: suiClient,
-        onlyTransactionKind: true,
-      });
-      const perServer = await Promise.all(
-        servers.map(async (s, idx) => {
-          const serverName = KEY_SERVERS[idx]?.name || `Server-${idx}`;
+    // Generate txBytes without executing the transaction
+    const txBytes = await approveTx.build({
+      client: suiClient,
+      onlyTransactionKind: true,
+    });
+    const perServer = await Promise.all(
+      servers.map(async (s, idx) => {
+        const serverName = KEY_SERVERS[idx]?.name || `Server-${idx}`;
 
-          const primary = await deriveFromOneServer(s, selectedHex, sessionKey, txBytes);
-          let diag: Awaited<ReturnType<typeof deriveForDiagnosis>> | null = null;
-
-          if (primary.ok) {
-            logSealIbe(`${serverName} SUCCESS`, {
-              keyLength: primary.keyBytes.length,
-              frRisk: isLikelyFrOverflow.analysis,
-              counterId: `${counterId.slice(0, 10)}...`,
-            });
-            updateServerStats(serverName, true, isLikelyFrOverflow.analysis);
-          } else {
-            logSealIbe(`${serverName} FAILED`, {
-              error: primary.error,
-              isScalarError: primary.error.includes("Scalar out of range"),
-              frRisk: isLikelyFrOverflow.analysis,
-              counterId: `${counterId.slice(0, 10)}...`,
-            });
-            updateServerStats(serverName, false, isLikelyFrOverflow.analysis);
-
-            // Diagnostic for scalar errors to help with future debugging
-            if (primary.error.includes("Scalar out of range")) {
-              try {
-                diag = await deriveForDiagnosis(s, selectedHex, sessionKey, txBytes);
-                logSealIbe(`${serverName} DIAGNOSTIC`, {
-                  rawResult: diag.resRaw.ok ? "SUCCESS" : "FAILED",
-                  shaResult: diag.resSha.ok ? "SUCCESS" : "FAILED",
-                  frRisk: isLikelyFrOverflow.analysis,
-                });
-              } catch (_diagError) {
-                // Silent failure for diagnostics
-              }
-            }
-          }
-
-          return { idx, server: s, primary, diag, serverName };
-        }),
-      );
-
-      const keyShares: KeyShare[] = [];
-      const errors: Array<{ serverIndex: number; server: OneServerCfg; error: string }> = [];
-
-      for (const entry of perServer) {
-        const { idx, server, primary } = entry;
+        const primary = await deriveFromOneServer(s, selectedHex, sessionKey, txBytes);
 
         if (primary.ok) {
-          assertG1Compressed(`DerivedKey-server${idx}`, primary.keyBytes);
-          keyShares.push({
-            serverIndex: idx,
-            serverId: primary.serverId,
-            secretKey: primary.keyBytes,
+          logSealIbe(`${serverName} SUCCESS`, {
+            keyLength: primary.keyBytes.length,
+            frRisk: isLikelyFrOverflow.analysis,
+            counterId: `${counterId.slice(0, 10)}...`,
           });
-          continue;
+          updateServerStats(serverName, true, isLikelyFrOverflow.analysis);
+        } else {
+          logSealIbe(`${serverName} FAILED`, {
+            error: primary.error,
+            isScalarError: primary.error.includes("Scalar out of range"),
+            frRisk: isLikelyFrOverflow.analysis,
+            counterId: `${counterId.slice(0, 10)}...`,
+          });
+          updateServerStats(serverName, false, isLikelyFrOverflow.analysis);
         }
 
-        errors.push({
+        return { idx, server: s, primary };
+      }),
+    );
+
+    const keyShares: KeyShare[] = [];
+    const errors: Array<{ serverIndex: number; server: OneServerCfg; error: string }> = [];
+
+    for (const entry of perServer) {
+      const { idx, server, primary } = entry;
+
+      if (primary.ok) {
+        assertG1Compressed(`DerivedKey-server${idx}`, primary.keyBytes);
+        keyShares.push({
           serverIndex: idx,
-          server,
-          error: primary.ok ? "" : primary.error,
+          serverId: primary.serverId,
+          secretKey: primary.keyBytes,
         });
+        continue;
       }
 
-      keyShares.sort((a, b) => a.serverIndex - b.serverIndex);
+      errors.push({
+        serverIndex: idx,
+        server,
+        error: primary.error,
+      });
+    }
 
-      if (keyShares.length < requiredCount) {
-        // Check for expired session keys before throwing aggregated error
-        const hasExpired = errors.some((e) =>
-          e.error.toLowerCase().includes("session key has expired"),
-        );
-        if (hasExpired) {
-          logSealIbe("Session expired detected in server responses, throwing for retry");
-          throw new ExpiredSessionError();
-        }
+    keyShares.sort((a, b) => a.serverIndex - b.serverIndex);
 
-        logSealIbe("Key derivation failed", {
-          need: requiredCount,
-          got: keyShares.length,
-          errors: errors.length,
-        });
-
-        throw new Error(
-          `Not enough successful servers (need ${requiredCount}, got ${keyShares.length}). ` +
-            `Errors: ${JSON.stringify(errors, null, 2)}`,
-        );
+    if (keyShares.length < requiredCount) {
+      // Check for expired session keys before throwing aggregated error
+      const hasExpired = errors.some((e) =>
+        e.error.toLowerCase().includes("session key has expired"),
+      );
+      if (hasExpired) {
+        logSealIbe("Session expired detected in server responses, throwing for retry");
+        throw new ExpiredSessionError();
       }
-      logSealIbe("Key derivation successful", {
-        servers: keyShares.length,
-        required: requiredCount,
+
+      logSealIbe("Key derivation failed", {
+        need: requiredCount,
+        got: keyShares.length,
+        errors: errors.length,
       });
 
-      // Log statistics after each round
-      logServerStats();
-
-      keyShares.splice(requiredCount);
-      return keyShares;
-    } catch (error) {
-      throw new Error(`Real Key Server integration failed: ${error}`);
+      throw new Error(
+        `Not enough successful servers (need ${requiredCount}, got ${keyShares.length}). ` +
+          `Errors: ${JSON.stringify(errors, null, 2)}`,
+      );
     }
+    logSealIbe("Key derivation successful", {
+      servers: keyShares.length,
+      required: requiredCount,
+    });
+
+    // Log statistics after each round
+    logServerStats();
+
+    keyShares.splice(requiredCount);
+    return keyShares;
   });
 };
 
 // ================================
 // SIGNATURE OPERATIONS
 // ================================
+
+/**
+ * Parse key share as G1 point, handling both compressed and uncompressed formats
+ */
+function parseKeyShare(
+  keyBytes: Uint8Array,
+  index: number,
+): ReturnType<typeof bls12_381.G1.Point.fromBytes> {
+  try {
+    // Try compressed format first (48 bytes)
+    return bls12_381.G1.Point.fromBytes(keyBytes);
+  } catch (_e) {
+    // Try uncompressed format (96 bytes)
+    if (keyBytes.length === 96) {
+      return bls12_381.G1.Point.fromHex(Buffer.from(keyBytes).toString("hex"));
+    }
+    throw new Error(
+      `Invalid key share ${index} format. Expected 48 or 96 bytes, got ${keyBytes.length}`,
+    );
+  }
+}
 
 /**
  * Aggregate IBE secret keys directly as signature
@@ -681,43 +600,13 @@ const aggregateIBESignature = (keyShares: KeyShare[]): Uint8Array => {
     throw new Error("No key shares to aggregate");
   }
 
-  let aggregatedSignature: ReturnType<typeof bls12_381.G1.Point.fromBytes>;
-
-  try {
-    // Parse as compressed G1 point
-    aggregatedSignature = bls12_381.G1.Point.fromBytes(keyShares[0].secretKey);
-  } catch (_e) {
-    // Try uncompressed format if compressed fails
-    if (keyShares[0].secretKey.length === 96) {
-      try {
-        const uncompressed = keyShares[0].secretKey;
-        const point = bls12_381.G1.Point.fromHex(Buffer.from(uncompressed).toString("hex"));
-        aggregatedSignature = point;
-      } catch (e2) {
-        throw new Error(`Cannot parse IBE key: ${e2}`);
-      }
-    } else {
-      throw new Error(
-        `Invalid IBE key format. Expected 48 or 96 bytes, got ${keyShares[0].secretKey.length}`,
-      );
-    }
-  }
+  // Parse first key share
+  let aggregatedSignature = parseKeyShare(keyShares[0].secretKey, 0);
 
   // Aggregate remaining key shares
   for (let i = 1; i < keyShares.length; i++) {
-    try {
-      const ibeKey = bls12_381.G1.Point.fromBytes(keyShares[i].secretKey);
-      aggregatedSignature = aggregatedSignature.add(ibeKey);
-    } catch (e) {
-      if (keyShares[i].secretKey.length === 96) {
-        const point = bls12_381.G1.Point.fromHex(
-          Buffer.from(keyShares[i].secretKey).toString("hex"),
-        );
-        aggregatedSignature = aggregatedSignature.add(point);
-      } else {
-        throw new Error(`Failed to parse key share ${i}: ${e}`);
-      }
-    }
+    const keyPoint = parseKeyShare(keyShares[i].secretKey, i);
+    aggregatedSignature = aggregatedSignature.add(keyPoint);
   }
 
   const aggregatedBytes = aggregatedSignature.toBytes(true); // 48 bytes compressed G1 point
@@ -729,58 +618,30 @@ const aggregateIBESignature = (keyShares: KeyShare[]): Uint8Array => {
 };
 
 /**
- * Create BLS multisig signature using aggregated IBE signature
- */
-const createSealIbeMultisigSignature = (
-  aggregatedIBESignature: Uint8Array,
-  message: string,
-  identity: string,
-): BlsMultisigSignature => {
-  const messageBytes = new TextEncoder().encode(message);
-
-  return {
-    signature: aggregatedIBESignature,
-    message: messageBytes,
-    identity,
-  };
-};
-
-/**
  * Generate BLS signature using real Seal Key Server IBE key derivation
  */
 const generateSealIbeSignature = async (
-  _client: SuiClient,
   counterId: string,
   keypair: Ed25519Keypair,
   message: string,
 ): Promise<{ signature: Uint8Array; keyServerIds: string[] }> => {
-  try {
-    // Step 1: Fetch IBE key shares from real Key Servers for the specific message
-    const keyShares = await fetchSecretKeyShares(counterId, keypair, message, THRESHOLD_RUNTIME);
+  // Step 1: Fetch IBE key shares from real Key Servers for the specific message
+  const keyShares = await fetchSecretKeyShares(counterId, keypair, message, THRESHOLD_RUNTIME);
 
-    if (keyShares.length !== THRESHOLD_RUNTIME) {
-      throw new Error(`Expected ${THRESHOLD_RUNTIME} key shares, got ${keyShares.length}`);
-    }
-
-    // Step 2: Aggregate IBE keys (which are already message-specific)
-    const aggregatedIBESignature = aggregateIBESignature(keyShares);
-
-    // Step 3: Use aggregated IBE key as SEAL IBE signature
-    const signature = createSealIbeMultisigSignature(
-      aggregatedIBESignature,
-      message,
-      keypair.getPublicKey().toSuiAddress(),
-    );
-
-    const keyServerIds = keyShares.map((share) => share.serverId);
-
-    return {
-      signature: signature.signature,
-      keyServerIds,
-    };
-  } catch (error) {
-    throw new Error(`SEAL IBE signature generation failed: ${error}`);
+  if (keyShares.length !== THRESHOLD_RUNTIME) {
+    throw new Error(`Expected ${THRESHOLD_RUNTIME} key shares, got ${keyShares.length}`);
   }
+
+  // Step 2: Aggregate IBE keys (which are already message-specific)
+  const aggregatedIBESignature = aggregateIBESignature(keyShares);
+
+  // Step 3: Use aggregated IBE key as SEAL IBE signature
+  const keyServerIds = keyShares.map((share) => share.serverId);
+
+  return {
+    signature: aggregatedIBESignature,
+    keyServerIds,
+  };
 };
 
 // ================================
@@ -1014,7 +875,6 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     logSealIbe("Test Initialization", {
       network: NETWORK,
       threshold: THRESHOLD_RUNTIME,
-      idMode: ID_MODE,
       packageId: COUNTER_PACKAGE_ID,
     });
   });
@@ -1035,7 +895,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     const stepCounterId = await createSealIbeMultisigCounter(client, keypair);
 
     const message = "test-msg";
-    const result = await generateSealIbeSignature(client, stepCounterId, keypair, message);
+    const result = await generateSealIbeSignature(stepCounterId, keypair, message);
 
     // Verify signature format (G1 compressed point = 48 bytes)
     expect(result.signature).toHaveLength(48);
@@ -1053,7 +913,6 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
 
     const message = "verify-msg";
     const { signature, keyServerIds } = await generateSealIbeSignature(
-      client,
       stepCounterId,
       keypair,
       message,
@@ -1081,7 +940,6 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     const message = "incr-msg";
 
     const { signature, keyServerIds } = await generateSealIbeSignature(
-      client,
       stepCounterId,
       keypair,
       message,
@@ -1238,7 +1096,6 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
     // Generate signature
     const message = "integ-msg";
     const { signature, keyServerIds } = await generateSealIbeSignature(
-      client,
       integrationCounterId,
       keypair,
       message,
