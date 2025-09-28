@@ -15,9 +15,14 @@ import { SealClient, SessionKey } from "@mysten/seal";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { type Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import { fromBase64, fromHex, normalizeSuiAddress, toHex } from "@mysten/sui/utils";
 import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { consola } from "consola";
-import { counterPackage, type Seal_ibe_multisig_counterSealIbeMultisigCounterType } from "@/abi";
+import {
+  counterPackage,
+  type Key_serverKeyServerV1Type,
+  type Seal_ibe_multisig_counterSealIbeMultisigCounterType,
+} from "@/abi";
 import { getKeypair } from "./utils/keybook.js";
 
 // ================================
@@ -110,18 +115,12 @@ function logSealIbe(message: string, data?: unknown) {
 }
 
 /**
- * Debug utility: hex formatter for byte arrays
- */
-function hex(u8: Uint8Array): `0x${string}` {
-  return `0x${Buffer.from(u8).toString("hex")}`;
-}
-
-/**
- * Debug utility: convert hex string to 32-byte array (left zero padded)
+ * Convert hex string to 32-byte array (left zero padded)
+ * For addresses, use normalizeSuiAddress + fromHex instead
  */
 function hexTo32Bytes(hexStr: string): Uint8Array {
-  const h = hexStr.startsWith("0x") ? hexStr.slice(2) : hexStr;
-  return new Uint8Array(Buffer.from(h.padStart(64, "0"), "hex"));
+  const normalized = normalizeSuiAddress(hexStr);
+  return fromHex(normalized);
 }
 
 /**
@@ -452,7 +451,7 @@ const fetchSecretKeyShares = async (
     // Step 1: Build InnerID exactly as Move expects (without package prefix)
     const messageBytes = new TextEncoder().encode(message);
     const { inner } = buildInnerId(counterId, signerAddress, messageBytes);
-    const selectedHex = hex(inner);
+    const selectedHex = toHex(inner) as `0x${string}`;
 
     // Analyze ID for potential Fr scalar range issues
     const isLikelyFrOverflow = analyzeFrRisk(inner);
@@ -584,7 +583,7 @@ function parseKeyShare(
   } catch (_e) {
     // Try uncompressed format (96 bytes)
     if (keyBytes.length === 96) {
-      return bls12_381.G1.Point.fromHex(Buffer.from(keyBytes).toString("hex"));
+      return bls12_381.G1.Point.fromHex(toHex(keyBytes));
     }
     throw new Error(
       `Invalid key share ${index} format. Expected 48 or 96 bytes, got ${keyBytes.length}`,
@@ -715,8 +714,9 @@ const getRealSealShardPublicKeys = async (
       }
 
       // Extract pk following the ABI-defined structure
-      const v1Fields = (v1Content as { fields?: { value?: { fields?: { pk?: unknown } } } }).fields;
-      const pkField = v1Fields?.value?.fields?.pk;
+      const v1Fields = v1Content.fields as { value?: { fields?: Key_serverKeyServerV1Type } };
+      const keyServerV1 = v1Fields?.value?.fields;
+      const pkField = keyServerV1?.pk;
 
       if (!pkField) {
         throw new Error(`No pk field found in KeyServerV1 object: ${v1Field.objectId}`);
@@ -728,9 +728,9 @@ const getRealSealShardPublicKeys = async (
         mpkBytes = new Uint8Array(pkField);
       } else if (typeof pkField === "string") {
         if (pkField.startsWith("0x")) {
-          mpkBytes = new Uint8Array(Buffer.from(pkField.slice(2), "hex"));
+          mpkBytes = fromHex(pkField);
         } else {
-          mpkBytes = new Uint8Array(Buffer.from(pkField, "base64"));
+          mpkBytes = fromBase64(pkField);
         }
       } else {
         throw new Error(`Unexpected pk field format in ${keyServerId}: ${typeof pkField}`);
@@ -1003,7 +1003,7 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
         // Test key derivation with fixed ID
         const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
         await withSessionKey(suiClient, signerAddress, keypair, async (sessionKey) => {
-          const selectedHex = hex(inner);
+          const selectedHex = toHex(inner) as `0x${string}`;
 
           // Test each server individually
           const servers = [
