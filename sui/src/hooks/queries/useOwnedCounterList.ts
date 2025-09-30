@@ -1,22 +1,20 @@
 import { useCurrentAccount, useSuiClientContext } from "@mysten/dapp-kit";
 import { SuiGraphQLClient } from "@mysten/sui/graphql";
 import { useQuery } from "@tanstack/react-query";
-import {
-  type Owned_counterOwnedCounterType,
-  parseOwned_counterOwnedCounter,
-} from "@/abi/counter.abi";
+import consola from "consola";
+import { z } from "zod";
 import { getOwnedCountersQuery } from "@/graphql/counter-queries";
 import { useNetworkVariable } from "@/networkConfig";
 import { getGraphQLUrl, type Network } from "@/types/network";
 
-// Type guards
-interface NodeContents {
-  json?: unknown;
-  type?: { repr?: string };
-}
+// Zod schema for strict validation
+const OwnedCounterSchema = z.object({
+  id: z.object({ id: z.string() }),
+  value: z.union([z.string(), z.number(), z.bigint()]),
+});
 
 interface ValidNode {
-  contents: NodeContents;
+  contents: { json?: unknown };
   address: string;
   version: string | number;
 }
@@ -33,33 +31,30 @@ function isValidNode(node: unknown): node is ValidNode {
   );
 }
 
-function hasValidJson(contents: NodeContents): contents is NodeContents & { json: unknown } {
-  return contents.json !== undefined && contents.json !== null;
-}
-
-export type OwnedCounterData = Omit<Owned_counterOwnedCounterType, "id"> & {
+export type OwnedCounterData = {
   id: string;
+  value: string;
   version: string;
 };
 
 function parseOwnedCounterData(
-  contents: NodeContents,
+  contents: { json?: unknown },
   nodeAddress: string,
   nodeVersion: string | number,
 ): OwnedCounterData | null {
-  if (!hasValidJson(contents)) return null;
+  if (!contents.json) return null;
 
-  // Use ABI-generated parse function for type safety
-  const counterData = parseOwned_counterOwnedCounter(contents.json);
-  if (!counterData) {
+  const result = OwnedCounterSchema.safeParse(contents.json);
+  if (!result.success) {
+    consola.warn("Invalid OwnedCounter data:", result.error.format());
     return null;
   }
 
   return {
-    ...counterData,
     id: nodeAddress,
+    value: String(result.data.value),
     version: String(nodeVersion),
-  } satisfies OwnedCounterData;
+  };
 }
 
 export function useOwnedCounterList() {

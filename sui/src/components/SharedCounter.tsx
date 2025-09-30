@@ -31,7 +31,7 @@ export function SharedCounter({ id }: SharedCounterProps) {
     <CounterDisplay
       id={id}
       title="Shared Counter"
-      value={data ? data.value : ""}
+      value={data?.value ?? ""}
       isLoading={isLoading}
       isIncrementing={isIncrementing}
       isSettingValue={isSettingValue}

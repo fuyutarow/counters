@@ -15,5 +15,8 @@ yarn.lock
 bun.lock
 bun.lockb
 
+# @mysten/codegen generated summaries
+**/package_summaries/
+
 # Environment-specific package overrides
 suigen-config.local.json

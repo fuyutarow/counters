@@ -66,7 +66,7 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
     <CounterDisplay
       id={id}
       title="Owned Counter"
-      value={data ? data.value : ""}
+      value={data?.value ?? ""}
       isLoading={isLoading}
       isIncrementing={isIncrementing}
       isSettingValue={isSettingValue}
