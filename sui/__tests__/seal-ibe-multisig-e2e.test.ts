@@ -18,11 +18,8 @@ import { Transaction } from "@mysten/sui/transactions";
 import { fromBase64, fromHex, normalizeSuiAddress, toHex } from "@mysten/sui/utils";
 import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { consola } from "consola";
-import {
-  counterPackage,
-  type Key_serverKeyServerV1Type,
-  parseSeal_ibe_multisig_counterSealIbeMultisigCounter,
-} from "@/abi";
+import { z } from "zod";
+import * as counterPackage from "@/generated/counter/seal_ibe_multisig_counter";
 import { getKeypair } from "./utils/keybook.js";
 
 // ================================
@@ -34,7 +31,7 @@ const THRESHOLD = 2; // 2-of-3 threshold
 const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
   ? Number(process.env.SEAL_TEST_THRESHOLD)
   : THRESHOLD;
-const COUNTER_PACKAGE_ID = counterPackage.packageId;
+const COUNTER_PACKAGE_ID = "0x428e7ca6144417cd9e6bfe9b8a8c5f6fc612a4761b5720c6f25bdc79815c453a"; // testnet counter package
 
 // Session management constants
 const SESSION_KEY_TTL_MIN = 30;
@@ -109,6 +106,16 @@ interface ServerStats {
 // ================================
 // UTILITY FUNCTIONS
 // ================================
+
+/**
+ * Zod schema for SealIbeMultisigCounter fields
+ */
+const SealIbeMultisigCounterSchema = z.object({
+  value: z.union([z.string(), z.number(), z.bigint()]).transform((val) => {
+    if (typeof val === "bigint") return val;
+    return BigInt(val);
+  }),
+});
 
 /**
  * Enhanced logging for debugging instability
@@ -473,13 +480,10 @@ const fetchSecretKeyShares = async (
 
     // Step 2: Build seal_approve transaction for txBytes (DO NOT EXECUTE)
     const approveTx = new Transaction();
-    counterPackage.seal_ibe_multisig_counter.seal_approve(approveTx, {
-      arguments: [
-        approveTx.pure.vector("u8", Array.from(inner)),
-        approveTx.object(counterId),
-        approveTx.pure.vector("u8", Array.from(messageBytes)),
-      ],
-    });
+    counterPackage.sealApprove({
+      package: COUNTER_PACKAGE_ID,
+      arguments: [Array.from(inner), counterId, Array.from(messageBytes)],
+    })(approveTx);
 
     // Generate txBytes without executing the transaction
     const txBytes = await approveTx.build({
@@ -667,10 +671,7 @@ const getCounterValue = async (client: SuiClient, counterId: string): Promise<nu
   }
 
   const content = counterObject.data.content;
-  const parsedFields = parseSeal_ibe_multisig_counterSealIbeMultisigCounter(content.fields);
-  if (!parsedFields) {
-    throw new Error(`Failed to parse counter fields: ${counterId}`);
-  }
+  const parsedFields = SealIbeMultisigCounterSchema.parse(content.fields);
   return Number(parsedFields.value);
 };
 
@@ -739,7 +740,7 @@ const getRealSealShardPublicKeys = async (
       }
 
       const fieldsObject = valueField as { fields: unknown };
-      const keyServerV1 = fieldsObject.fields as Key_serverKeyServerV1Type;
+      const keyServerV1 = fieldsObject.fields as KeyServerV1Type;
       const pkField = keyServerV1.pk;
 
       if (!pkField) {
@@ -784,13 +785,10 @@ const createSealIbeMultisigCounter = async (
   // Fetch real public keys from Seal Key Servers
   const publicKeys = await getRealSealShardPublicKeys(keyServerIds, NETWORK);
 
-  counterPackage.seal_ibe_multisig_counter.share(tx, {
-    arguments: [
-      tx.pure.vector("id", keyServerIds),
-      tx.pure.vector("vector<u8>", publicKeys),
-      tx.pure.u64(THRESHOLD),
-    ],
-  });
+  counterPackage.share({
+    package: COUNTER_PACKAGE_ID,
+    arguments: [keyServerIds, publicKeys, THRESHOLD],
+  })(tx);
 
   const result = await client.signAndExecuteTransaction({
     signer: keypair,
@@ -831,39 +829,39 @@ const verifySignatureAndCreateProof = async (
   const messageBytes = new TextEncoder().encode(message);
 
   // Step 1: Create AggregatedPublicKey
-  const [aggregatedKey] = counterPackage.seal_ibe_multisig_counter.new_seal_ibe_aggregated_pk(tx, {
-    arguments: [tx.object(counterId)],
-  });
+  const [aggregatedKey] = counterPackage.newSealIbeAggregatedPk({
+    package: COUNTER_PACKAGE_ID,
+    arguments: [counterId],
+  })(tx);
 
   // Step 2: Add Key Server public keys from seal_ibe_table (no Key Server object access)
   // The public keys are already stored in the Counter's seal_ibe_table from Step 1
   // aggregate_signer_pubkey reads from the table, not from Key Server objects
   // Use only the servers that actually provided signatures (limited by THRESHOLD_RUNTIME)
   for (const keyServerId of keyServerIds.slice(0, THRESHOLD_RUNTIME)) {
-    counterPackage.seal_ibe_multisig_counter.aggregate_signer_pubkey(tx, {
-      arguments: [tx.object(counterId), aggregatedKey, tx.pure.id(keyServerId)],
-    });
+    counterPackage.aggregateSignerPubkey({
+      package: COUNTER_PACKAGE_ID,
+      arguments: [counterId, aggregatedKey, keyServerId],
+    })(tx);
   }
 
   // Step 3: Verify signature and create proof
-  const [proof] = counterPackage.seal_ibe_multisig_counter.verify_and_create_proof(tx, {
-    arguments: [
-      tx.object(counterId),
-      aggregatedKey,
-      tx.pure.vector("u8", Array.from(signature)),
-      tx.pure.vector("u8", Array.from(messageBytes)),
-    ],
-  });
+  const [proof] = counterPackage.verifyAndCreateProof({
+    package: COUNTER_PACKAGE_ID,
+    arguments: [counterId, aggregatedKey, Array.from(signature), Array.from(messageBytes)],
+  })(tx);
 
   // Step 4: Increment counter with proof
-  counterPackage.seal_ibe_multisig_counter.increment(tx, {
-    arguments: [tx.object(counterId), proof],
-  });
+  counterPackage.increment({
+    package: COUNTER_PACKAGE_ID,
+    arguments: [counterId, proof],
+  })(tx);
 
   // Step 5: Clean up AggregatedPublicKey
-  counterPackage.seal_ibe_multisig_counter.destroy_seal_ibe_aggregated_pk(tx, {
+  counterPackage.destroySealIbeAggregatedPk({
+    package: COUNTER_PACKAGE_ID,
     arguments: [aggregatedKey],
-  });
+  })(tx);
 
   // Set manual gas budget to avoid dry run failure
   tx.setGasBudget(10000000); // 10M MIST
@@ -1049,13 +1047,10 @@ describe("SEAL IBE Multisig End-to-End Integration", () => {
           ];
 
           const approveTx = new Transaction();
-          counterPackage.seal_ibe_multisig_counter.seal_approve(approveTx, {
-            arguments: [
-              approveTx.pure.vector("u8", Array.from(inner)),
-              approveTx.object(counterId),
-              approveTx.pure.vector("u8", Array.from(messageBytes)),
-            ],
-          });
+          counterPackage.sealApprove({
+            package: COUNTER_PACKAGE_ID,
+            arguments: [Array.from(inner), counterId, Array.from(messageBytes)],
+          })(approveTx);
           const txBytes = await approveTx.build({
             client: suiClient,
             onlyTransactionKind: true,

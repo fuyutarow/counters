@@ -109,15 +109,25 @@ alias = "tc"
 run = "bun tsc --noEmit"
 
 [tasks.codegen]
-description = "Sui ABI型定義の生成"
+description = "Sui ABI型定義の生成 (@mysten/codegen)"
 alias = "gen"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
+PACKAGE="${1:-counter}"
 echo "🏗️ 型定義生成中..."
 echo ""
-echo "Sui ABI定義を生成中..."
-bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi
+echo "Step 1: Move サマリー生成中..."
+cd move/$PACKAGE && sui move summary && cd ../..
+echo ""
+echo "Step 2: TypeScript型定義生成中..."
+bunx @mysten/codegen generate
+echo ""
+echo "Step 3: 型インポートを修正中 (type keyword)..."
+bun biome check --write src/generated/
+echo ""
+echo "Step 4: .js拡張子を削除中..."
+bun scripts/fix-generated-imports.ts
 echo ""
 echo "✅ 型定義生成完了！"
 '''
@@ -369,7 +379,24 @@ echo "✅ Moveクリーン完了"
 # 📄 アトミック コードジェネレーションタスク
 # ===============================================
 
-[tasks."codegen:abi"]
-description = "Sui ABI定義のみ生成"
-alias = ["gen-abi", "abigen"]
-run = "bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi"
+[tasks."codegen:summary"]
+description = "Move サマリーのみ生成"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+PACKAGE="${1:-counter}"
+echo "📦 $PACKAGE のサマリー生成中..."
+cd move/$PACKAGE && sui move summary && cd ../..
+echo "✅ サマリー生成完了: move/$PACKAGE/package_summaries/"
+'''
+
+[tasks."codegen:ts"]
+description = "TypeScript型定義のみ生成 (summary前提)"
+alias = ["gen-ts", "tsgen"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🏗️ TypeScript型定義生成中..."
+bunx sui-ts-codegen generate
+echo "✅ 型定義生成完了！"
+'''

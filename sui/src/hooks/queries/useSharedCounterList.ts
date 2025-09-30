@@ -1,37 +1,42 @@
 import { useSuiClientContext } from "@mysten/dapp-kit";
 import { SuiGraphQLClient } from "@mysten/sui/graphql";
 import { useQuery } from "@tanstack/react-query";
-import {
-  parseShared_counterSharedCounter,
-  type Shared_counterSharedCounterType,
-} from "@/abi/counter.abi";
+import consola from "consola";
+import { z } from "zod";
 import { getSharedCountersQuery } from "@/graphql/counter-queries";
 import { useNetworkVariable } from "@/networkConfig";
 import { getGraphQLUrl, type Network } from "@/types/network";
 
-export type SharedCounterData = Omit<Shared_counterSharedCounterType, "id"> & {
+// Zod schema for strict validation
+const SharedCounterSchema = z.object({
+  id: z.object({ id: z.string() }),
+  value: z.union([z.string(), z.number(), z.bigint()]),
+});
+
+export type SharedCounterData = {
   id: string;
+  value: string;
   version: string;
 };
 
 function parseSharedCounterData(
-  contents: { json?: unknown; type?: { repr?: string } | undefined },
+  contents: { json?: unknown },
   nodeAddress: string,
   nodeVersion: string | number,
 ): SharedCounterData | null {
-  if (!contents || contents.json === undefined || contents.json === null) return null;
+  if (!contents.json) return null;
 
-  // Use ABI-generated parse function for type safety
-  const counterData = parseShared_counterSharedCounter(contents.json);
-  if (!counterData) {
+  const result = SharedCounterSchema.safeParse(contents.json);
+  if (!result.success) {
+    consola.warn("Invalid SharedCounter data:", result.error.format());
     return null;
   }
 
   return {
-    ...counterData,
     id: nodeAddress,
+    value: String(result.data.value),
     version: String(nodeVersion),
-  } satisfies SharedCounterData;
+  };
 }
 
 export function useSharedCounterList() {
