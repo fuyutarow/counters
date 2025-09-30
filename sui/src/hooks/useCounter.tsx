@@ -179,7 +179,7 @@ export function useCounter() {
     mutationKey: ["counter", "shared", "create"],
     mutationFn: async (): Promise<string> => {
       const tx = new Transaction();
-      counterPackage.shared_counter.create(tx);
+      counterPackage.shared_counter.share(tx);
 
       const result = await executeTransaction({ transaction: tx });
       const created = result.objectChanges?.find((c: SuiObjectChange) => c.type === "created");

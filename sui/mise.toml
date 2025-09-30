@@ -11,6 +11,13 @@ gas_budget = "100000000"
 # 🚀 主要ワークフロー（よく使うタスク）
 # ===============================================
 
+[tasks.install-cli]
+run = '''
+suiup install sui
+# suiup install sui --nightly=sui-pkg-alt -y
+'''
+
+
 [tasks.dev]
 description = "フロントエンド開発サーバーの起動"
 alias = "d"
@@ -38,10 +45,10 @@ echo "Step 2: SUIトークン取得中..."
 mise run faucet:$NETWORK 2>/dev/null || mise run faucet:testnet
 echo ""
 echo "Step 3: $PACKAGE ビルド中..."
-mise run sui:build $PACKAGE
+mise run move:build $PACKAGE
 echo ""
 echo "Step 4: $PACKAGE を $NETWORK にパブリッシュ中..."
-mise run sui:publish $PACKAGE $NETWORK
+mise run sui:deploy $PACKAGE $NETWORK
 echo ""
 echo "🎉 デプロイ完了！"
 '''
@@ -49,7 +56,7 @@ echo "🎉 デプロイ完了！"
 [tasks.test]
 description = "全テストの実行"
 alias = "t"
-run = "bun test"
+run = "bun test __tests__"
 
 [tasks.clean]
 description = "全ビルド成果物のクリーンアップ"
@@ -73,7 +80,7 @@ echo "📦 package.jsonを最新バージョンに更新中..."
 bunx npm-check-updates -u
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-bun install
+npm install
 echo "✅ 依存関係を最新バージョンに更新完了！"
 '''
 
@@ -134,10 +141,10 @@ echo "Step 2: SUIトークン取得中..."
 mise run faucet:devnet
 echo ""
 echo "Step 3: コントラクトビルド中..."
-mise run sui:build
+mise run move:build
 echo ""
 echo "Step 4: コントラクトパブリッシュ中..."
-mise run sui:publish
+mise run sui:deploy
 echo ""
 echo "🎉 デプロイ完了！"
 '''
@@ -235,7 +242,7 @@ echo "✅ ESLint修正完了"
 
 [tasks."sui:env"]
 description = "指定ネットワーク用にSui CLI設定"
-alias = "sui-env"
+alias = ["sui-env", "se"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -292,9 +299,9 @@ echo "✅ faucet要求完了！"
 # 🔨 アトミック Sui Moveタスク
 # ===============================================
 
-[tasks."sui:build"]
+[tasks."move:build"]
 description = "Moveコントラクトのみビルド"
-alias = "move-build"
+alias = ["mb", "build:move"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -304,9 +311,9 @@ cd move/$PACKAGE && sui move build
 echo "✅ $PACKAGE ビルド完了"
 '''
 
-[tasks."sui:publish"]
+[tasks."sui:deploy"]
 description = "Moveコントラクトのみパブリッシュ"
-alias = "move-publish"
+alias = ["sd", "deploy:move"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -325,13 +332,26 @@ echo "  2. mise run gen    # ABI定義の更新"
 echo "  3. mise run dev    # 開発サーバー再起動"
 '''
 
+[tasks."move:test"]
+description = "Moveコントラクトのテスト実行"
+alias = ["mt", "test:move"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+PACKAGE="${1:-counter}"
+echo "🧪 $PACKAGE のテスト実行中..."
+cd move/$PACKAGE && sui move test
+echo "✅ $PACKAGE テスト完了"
+'''
+
 [tasks."move:format"]
 description = "Moveコードフォーマットのみ"
+alias = ["mf", "format:move"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🎨 Moveコードフォーマット中..."
-bun @mysten/prettier-plugin-move --use-module-label=true -w move/**/*.move
+bunx @mysten/prettier-plugin-move --use-module-label=true -w move/**/*.move
 echo "✅ Moveコードフォーマット完了"
 '''
 
@@ -353,4 +373,3 @@ echo "✅ Moveクリーン完了"
 description = "Sui ABI定義のみ生成"
 alias = ["gen-abi", "abigen"]
 run = "bun scripts/suigenv0.ts --config suigen-config.json --network testnet --output src/abi"
-

@@ -557,8 +557,32 @@ async function generateABI(
     throw new Error(`Package not found: ${packageId}`);
   }
 
-  // Generate TypeScript bindings
-  const tsContent = await generateTypeScriptBindings(packageName, packageId, packageInfo);
+  // Debug: Log all modules and their addresses
+  if (process.env.DEBUG) {
+    for (const [_moduleName, _moduleData] of Object.entries(packageInfo)) {
+    }
+  }
+
+  // Filter modules to only include those from the specified package
+  // This prevents including dependent package modules in the generated ABI
+  const filteredModules = Object.fromEntries(
+    Object.entries(packageInfo).filter(([_moduleName, moduleData]) => {
+      const isOwnModule = moduleData.address === packageId;
+      if (process.env.DEBUG) {
+      }
+      return isOwnModule;
+    }),
+  );
+
+  if (Object.keys(filteredModules).length === 0) {
+    throw new Error(`No modules found for package ${packageId}`);
+  }
+
+  if (process.env.DEBUG) {
+  }
+
+  // Generate TypeScript bindings using filtered modules
+  const tsContent = await generateTypeScriptBindings(packageName, packageId, filteredModules);
 
   // Write to file
   const outputPath = path.join(outputDir, `${packageName}.abi.ts`);
