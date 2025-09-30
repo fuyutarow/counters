@@ -105,7 +105,13 @@
       "Bash(SEAL_TEST_THRESHOLD=1 m t)",
       "Read(//home/fuyu/**)",
       "mcp__serena__think_about_whether_you_are_done",
-      "mcp__serena__find_referencing_symbols"
+      "mcp__serena__find_referencing_symbols",
+      "WebFetch(domain:www.npmjs.com)",
+      "mcp__fetch__fetch",
+      "Bash(bunx eslint:*)",
+      "Bash(m b)",
+      "Bash(SEAL_TEST_THRESHOLD=1 bun test __tests__/seal-ibe-multisig-e2e.test.ts)",
+      "Bash(export SEAL_TEST_THRESHOLD=1)"
     ],
     "deny": [],
     "ask": []

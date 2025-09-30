@@ -102,6 +102,7 @@ export default [
       "**/*.d.ts",
       "move/**",
       "src/graphql/generated.ts",
+      "src/generated/**", // @mysten/codegen generated files
     ],
   },
 ];

@@ -10,9 +10,20 @@ import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { counterPackage, isOwned_counterOwnedCounterType } from "@/abi";
+import * as ownedCounter from "@/generated/counter/owned_counter";
+import * as sharedCounter from "@/generated/counter/shared_counter";
+import { useNetworkVariable } from "@/networkConfig";
 
-// Use ABI-generated type guards directly
+// Type guard for OwnedCounter
+function isOwnedCounterType(data: unknown): data is { id: { id: string }; value: string | bigint } {
+  if (!data || typeof data !== "object") return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    "id" in obj &&
+    "value" in obj &&
+    (typeof obj.value === "bigint" || typeof obj.value === "string")
+  );
+}
 
 // ================== Counter Value Query Hook ==================
 export function useCounterValue(counterId?: string) {
@@ -31,14 +42,14 @@ export function useCounterValue(counterId?: string) {
         return null;
       }
 
-      if (!isOwned_counterOwnedCounterType(obj.data.content.fields)) {
+      if (!isOwnedCounterType(obj.data.content.fields)) {
         return null;
       }
 
       const fields = obj.data.content.fields;
       return {
         id: counterId,
-        value: fields.value,
+        value: String(fields.value),
         type: "counter",
       } satisfies {
         id: string;
@@ -96,6 +107,7 @@ export function useCounter() {
   });
   const queryClient = useQueryClient();
   const account = useCurrentAccount();
+  const counterPackageId = useNetworkVariable("counterPackageId");
 
   // ================== Owned Counter Operations ==================
   const createOwnedCounter = useMutation({
@@ -106,7 +118,7 @@ export function useCounter() {
       }
 
       const tx = new Transaction();
-      const counter = counterPackage.owned_counter.new(tx);
+      const counter = ownedCounter._new({ package: counterPackageId })(tx);
       tx.transferObjects([counter], account.address);
 
       const result = await executeTransaction({ transaction: tx });
@@ -132,9 +144,10 @@ export function useCounter() {
     mutationKey: ["counter", "owned", "increment"],
     mutationFn: async (counterId: string): Promise<void> => {
       const tx = new Transaction();
-      counterPackage.owned_counter.increment(tx, {
+      ownedCounter.increment({
+        package: counterPackageId,
         arguments: [tx.object(counterId)],
-      });
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
 
@@ -155,9 +168,10 @@ export function useCounter() {
     mutationKey: ["counter", "owned", "setValue"],
     mutationFn: async (params: { counterId: string; value: bigint }): Promise<void> => {
       const tx = new Transaction();
-      counterPackage.owned_counter.set_value(tx, {
-        arguments: [tx.object(params.counterId), tx.pure.u64(params.value)],
-      });
+      ownedCounter.setValue({
+        package: counterPackageId,
+        arguments: [tx.object(params.counterId), params.value],
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
 
@@ -179,7 +193,7 @@ export function useCounter() {
     mutationKey: ["counter", "shared", "create"],
     mutationFn: async (): Promise<string> => {
       const tx = new Transaction();
-      counterPackage.shared_counter.share(tx);
+      sharedCounter.share({ package: counterPackageId })(tx);
 
       const result = await executeTransaction({ transaction: tx });
       const created = result.objectChanges?.find((c: SuiObjectChange) => c.type === "created");
@@ -204,9 +218,10 @@ export function useCounter() {
     mutationKey: ["counter", "shared", "increment"],
     mutationFn: async (counterId: string): Promise<void> => {
       const tx = new Transaction();
-      counterPackage.shared_counter.increment(tx, {
+      sharedCounter.increment({
+        package: counterPackageId,
         arguments: [tx.object(counterId)],
-      });
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
 
@@ -227,9 +242,10 @@ export function useCounter() {
     mutationKey: ["counter", "shared", "setValue"],
     mutationFn: async (params: { counterId: string; value: bigint }): Promise<void> => {
       const tx = new Transaction();
-      counterPackage.shared_counter.set_value(tx, {
-        arguments: [tx.object(params.counterId), tx.pure.u64(params.value)],
-      });
+      sharedCounter.setValue({
+        package: counterPackageId,
+        arguments: [tx.object(params.counterId), params.value],
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
 
@@ -280,9 +296,14 @@ export function useCounter() {
     },
 
     // 汎用的なトランザクション構築ヘルパー
-    buildTx: (builder: (tx: Transaction, pkg: typeof counterPackage) => void) => {
+    buildTx: (
+      builder: (
+        tx: Transaction,
+        pkg: { owned: typeof ownedCounter; shared: typeof sharedCounter; packageId: string },
+      ) => void,
+    ) => {
       const tx = new Transaction();
-      builder(tx, counterPackage);
+      builder(tx, { owned: ownedCounter, shared: sharedCounter, packageId: counterPackageId });
       return tx;
     },
 
