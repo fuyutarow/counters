@@ -27,11 +27,18 @@ public fun new(ctx: &mut TxContext): OwnedCounter {
 }
 
 /// Increment a counter by 1 (only owner can call this).
-public fun increment(counter: &mut OwnedCounter) {
-    counter.value = counter.value + 1;
+public fun increment(self: &mut OwnedCounter) {
+    self.value = self.value + 1;
 }
 
 /// Set value (only owner can call this since they own the object).
-public fun set_value(counter: &mut OwnedCounter, value: u64) {
-    counter.value = value;
+public fun set_value(self: &mut OwnedCounter, value: u64) {
+    self.value = value;
+}
+
+// === View Functions ===
+
+/// Get the current counter value.
+public fun value(self: &OwnedCounter): u64 {
+    self.value
 }

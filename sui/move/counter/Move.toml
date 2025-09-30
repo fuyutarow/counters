@@ -1,10 +1,11 @@
 [package]
-name = "counter"
+name = "Counter"
 version = "0.0.1"
 edition = "2024.beta"
 
 [dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+# seal = { local = "../../../MYSTENLABS/seal/move/seal" }
+seal = { local = "../seal" }
 
 [addresses]
 counter = "0x0"
