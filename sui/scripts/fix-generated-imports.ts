@@ -37,12 +37,10 @@ function fixImports(filePath: string): boolean {
 }
 
 const files = getAllTsFiles(GENERATED_DIR);
-let fixedCount = 0;
+let _fixedCount = 0;
 
 for (const file of files) {
   if (fixImports(file)) {
-    fixedCount++;
+    _fixedCount++;
   }
 }
-
-console.log(`✅ Fixed ${fixedCount} file(s) in ${GENERATED_DIR}`);
