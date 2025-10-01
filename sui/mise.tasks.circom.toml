@@ -184,3 +184,18 @@ mise run circom:verify $CIRCUIT
 echo ""
 echo "🎉 ZKワークフローテスト完了！"
 '''
+
+["circom:copy-to-public"]
+description = "回路ファイルを public/circuits/ にコピー (Next.js 用)"
+alias = "zk-web"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+CIRCUIT="${1:-private_counter}"
+echo "📦 $CIRCUIT をブラウザ用にコピー中..."
+mkdir -p public/circuits
+cp circuits/build/${CIRCUIT}_js/${CIRCUIT}.wasm public/circuits/
+cp circuits/keys/${CIRCUIT}_final.zkey public/circuits/
+echo "✅ public/circuits/ にコピー完了"
+ls -lh public/circuits/
+'''
