@@ -10,6 +10,7 @@
     "bradlc.vscode-tailwindcss",
     // Development tools
     "github.vscode-pull-request-github",
-    "mikestead.dotenv"
+    "mikestead.dotenv",
+    "iden3.circom"
   ]
 }
