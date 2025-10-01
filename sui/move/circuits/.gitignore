@@ -1,0 +1,21 @@
+# Circom build artifacts
+build/
+circomlib/
+proofs/*.wtns
+keys/powersOfTau28_*.ptau
+keys/*.zkey
+verifier.sol
+
+# Rust build artifacts
+convert-vk/target/
+convert-vk/Cargo.lock
+
+# Generated intermediate files
+keys/*_arkworks.json
+keys/*_arkworks.bin
+keys/*_arkworks_rust.bin
+proofs/*_arkworks.bin
+proofs/sui_test_data.json
+
+# Node modules (if any)
+node_modules/
