@@ -785,10 +785,12 @@ const createSealIbeMultisigCounter = async (
   // Fetch real public keys from Seal Key Servers
   const publicKeys = await getRealSealShardPublicKeys(keyServerIds, NETWORK);
 
-  counterPackage.share({
+  const shareOptions = {
     package: COUNTER_PACKAGE_ID,
     arguments: [keyServerIds, publicKeys, THRESHOLD],
-  })(tx);
+  };
+
+  counterPackage.share(shareOptions)(tx);
 
   const result = await client.signAndExecuteTransaction({
     signer: keypair,

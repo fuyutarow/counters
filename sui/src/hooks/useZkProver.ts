@@ -30,7 +30,7 @@ async function computePoseidonHash(inputs: bigint[]): Promise<bigint> {
   try {
     const poseidon = await buildPoseidon();
     const hash = poseidon(inputs);
-    const hashBigInt = poseidon.F.toBigInt(hash);
+    const hashBigInt = BigInt(poseidon.F.toString(hash));
     return hashBigInt;
   } catch (error) {
     throw new PoseidonHashError("Failed to compute Poseidon hash", error);
