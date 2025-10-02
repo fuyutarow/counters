@@ -153,7 +153,13 @@
       "Bash(circuits/convert-vk/target/release/convert-proof /tmp/proof.json /tmp/proof.bin)",
       "Bash(/home/fuyu/OPENJPY/c2/sui/circuits/convert-vk/target/release/convert-proof /tmp/proof.json /tmp/proof.bin)",
       "Bash(/bin/grep -A 5 \"circom:copy\")",
-      "Bash(/bin/grep -A 10 \"copy\")"
+      "Bash(/bin/grep -A 10 \"copy\")",
+      "Bash(rustc --version)",
+      "Bash(cargo:*)",
+      "Bash(curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf)",
+      "Bash(sh)",
+      "Bash(chmod:*)",
+      "Bash(bash:*)"
     ],
     "deny": [],
     "ask": []

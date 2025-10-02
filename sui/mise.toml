@@ -32,6 +32,7 @@ alias = "b"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
+{{mise_bin}} run build:wasm
 {{mise_bin}} run codegen
 {{mise_bin}} run build:ui
 '''
@@ -436,5 +437,18 @@ set -euo pipefail
 echo "🏗️ TypeScript型定義生成中..."
 bunx @mysten/codegen generate
 echo "✅ 型定義生成完了！"
+'''
+
+# ===============================================
+# 🔧 WASM関連タスク
+# ===============================================
+
+[tasks."build:wasm"]
+description = "Arkworks WASM変換器のビルド"
+alias = "wasm"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+bash scripts/build-wasm.sh
 '''
 
