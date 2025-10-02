@@ -164,7 +164,8 @@
       "Bash(m wasm:*)",
       "Bash(echo:*)",
       "Bash(m tn:*)",
-      "Bash(BUN_TEST_TIMEOUT=120000 bun test __tests__/node/private-counter.test.ts --test-name-pattern \"should increment private counter with ZK\")"
+      "Bash(BUN_TEST_TIMEOUT=120000 bun test __tests__/node/private-counter.test.ts --test-name-pattern \"should increment private counter with ZK\")",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []

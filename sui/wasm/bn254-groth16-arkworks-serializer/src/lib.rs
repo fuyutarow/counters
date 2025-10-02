@@ -1,10 +1,9 @@
 use ark_bn254::{Bn254, Fq, Fq2, G1Affine, G2Affine};
 use ark_groth16::Proof;
 use ark_serialize::CanonicalSerialize;
-use ark_ff::PrimeField;
 use serde::Deserialize;
-use wasm_bindgen::prelude::*;
 use std::str::FromStr;
+use wasm_bindgen::prelude::*;
 
 #[derive(Deserialize)]
 struct SnarkjsProof {
@@ -34,11 +33,17 @@ pub fn convert_proof_to_arkworks(proof_json: &str) -> Result<Vec<u8>, JsValue> {
 
     // 圧縮直列化: A(32B) + B(64B) + C(32B) = 128B
     let mut proof_bytes = Vec::with_capacity(128);
-    proof.a.serialize_compressed(&mut proof_bytes)
+    proof
+        .a
+        .serialize_compressed(&mut proof_bytes)
         .map_err(|e| JsValue::from_str(&format!("Serialize A error: {}", e)))?;
-    proof.b.serialize_compressed(&mut proof_bytes)
+    proof
+        .b
+        .serialize_compressed(&mut proof_bytes)
         .map_err(|e| JsValue::from_str(&format!("Serialize B error: {}", e)))?;
-    proof.c.serialize_compressed(&mut proof_bytes)
+    proof
+        .c
+        .serialize_compressed(&mut proof_bytes)
         .map_err(|e| JsValue::from_str(&format!("Serialize C error: {}", e)))?;
 
     // 長さ検証
@@ -60,12 +65,13 @@ pub fn convert_public_inputs_to_bytes(inputs_json: &str) -> Result<Vec<u8>, JsVa
     let mut result = Vec::with_capacity(inputs.len() * 32);
 
     for input in inputs {
-        let value = Fq::from_str(&input)
-            .map_err(|_| JsValue::from_str("Failed to parse field element"))?;
+        let value =
+            Fq::from_str(&input).map_err(|_| JsValue::from_str("Failed to parse field element"))?;
 
         // リトルエンディアン32バイト
         let mut bytes = vec![0u8; 32];
-        value.serialize_compressed(&mut bytes)
+        value
+            .serialize_compressed(&mut bytes)
             .map_err(|e| JsValue::from_str(&format!("Serialize error: {:?}", e)))?;
 
         result.extend_from_slice(&bytes);
@@ -79,10 +85,8 @@ fn parse_g1_affine(coords: &[String]) -> Result<G1Affine, String> {
         return Err("G1 point requires at least 2 coordinates".to_string());
     }
 
-    let x = Fq::from_str(&coords[0])
-        .map_err(|_| "Failed to parse x coordinate".to_string())?;
-    let y = Fq::from_str(&coords[1])
-        .map_err(|_| "Failed to parse y coordinate".to_string())?;
+    let x = Fq::from_str(&coords[0]).map_err(|_| "Failed to parse x coordinate".to_string())?;
+    let y = Fq::from_str(&coords[1]).map_err(|_| "Failed to parse y coordinate".to_string())?;
 
     Ok(G1Affine::new(x, y))
 }
@@ -92,14 +96,10 @@ fn parse_g2_affine(coords: &[Vec<String>]) -> Result<G2Affine, String> {
         return Err("G2 point requires 2x2 coordinates".to_string());
     }
 
-    let x0 = Fq::from_str(&coords[0][0])
-        .map_err(|_| "Failed to parse x0".to_string())?;
-    let x1 = Fq::from_str(&coords[0][1])
-        .map_err(|_| "Failed to parse x1".to_string())?;
-    let y0 = Fq::from_str(&coords[1][0])
-        .map_err(|_| "Failed to parse y0".to_string())?;
-    let y1 = Fq::from_str(&coords[1][1])
-        .map_err(|_| "Failed to parse y1".to_string())?;
+    let x0 = Fq::from_str(&coords[0][0]).map_err(|_| "Failed to parse x0".to_string())?;
+    let x1 = Fq::from_str(&coords[0][1]).map_err(|_| "Failed to parse x1".to_string())?;
+    let y0 = Fq::from_str(&coords[1][0]).map_err(|_| "Failed to parse y0".to_string())?;
+    let y1 = Fq::from_str(&coords[1][1]).map_err(|_| "Failed to parse y1".to_string())?;
 
     let x = Fq2::new(x0, x1); // c0, c1順
     let y = Fq2::new(y0, y1); // c0, c1順

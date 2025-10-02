@@ -54,10 +54,8 @@ fn main() {
     let output_path = &args[2];
 
     // Read snarkjs VK JSON
-    let vk_json = fs::read_to_string(input_path)
-        .expect("Failed to read input file");
-    let snarkjs_vk: SnarkjsVK = serde_json::from_str(&vk_json)
-        .expect("Failed to parse JSON");
+    let vk_json = fs::read_to_string(input_path).expect("Failed to read input file");
+    let snarkjs_vk: SnarkjsVK = serde_json::from_str(&vk_json).expect("Failed to parse JSON");
 
     // Convert to arkworks VerifyingKey
     let alpha_g1 = parse_g1_affine(&snarkjs_vk.vk_alpha_1);
@@ -65,7 +63,9 @@ fn main() {
     let gamma_g2 = parse_g2_affine(&snarkjs_vk.vk_gamma_2);
     let delta_g2 = parse_g2_affine(&snarkjs_vk.vk_delta_2);
 
-    let gamma_abc_g1: Vec<G1Affine> = snarkjs_vk.ic.iter()
+    let gamma_abc_g1: Vec<G1Affine> = snarkjs_vk
+        .ic
+        .iter()
         .map(|coords| parse_g1_affine(coords))
         .collect();
 
@@ -83,8 +83,7 @@ fn main() {
         .expect("Failed to serialize VK");
 
     // Write to file
-    fs::write(output_path, &vk_bytes)
-        .expect("Failed to write output file");
+    fs::write(output_path, &vk_bytes).expect("Failed to write output file");
 
     println!("✅ Converted VK to Arkworks format");
     println!("   Input:  {}", input_path);

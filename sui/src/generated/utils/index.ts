@@ -148,12 +148,6 @@ export function normalizeMoveArguments(
       normalizedArgs.push((tx) => tx.object(arg));
       continue;
     }
-    // Handle vector<object::ID> - array of IDs (pure values, not object references)
-    if (Array.isArray(arg) && type.includes("vector") && type.includes("::object::ID")) {
-      const bytes = bcs.vector(bcs.Address).serialize(arg);
-      normalizedArgs.push((tx) => tx.pure(bytes));
-      continue;
-    }
 
     throw new Error(`Invalid argument ${stringify(arg)} for type ${type}`);
   }
