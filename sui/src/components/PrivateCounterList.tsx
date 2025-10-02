@@ -16,7 +16,6 @@ export function PrivateCounterList() {
   const [counterIds, setCounterIds] = useState<string[]>([]);
 
   useEffect(() => {
-    // Load counter IDs from localStorage directly
     if (typeof window === "undefined") return;
     try {
       const stored = localStorage.getItem("privateCounters");

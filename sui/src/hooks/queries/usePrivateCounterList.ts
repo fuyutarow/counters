@@ -8,8 +8,9 @@ import { useNetworkVariable } from "@/networkConfig";
 import { getGraphQLUrl, type Network } from "@/types/network";
 
 // Zod schema for strict validation
-const OwnedCounterSchema = z.object({
-  value: z.union([z.string(), z.number(), z.bigint()]),
+const PrivateCounterSchema = z.object({
+  salt_digest: z.union([z.string(), z.number(), z.bigint()]),
+  value_digest: z.union([z.string(), z.number(), z.bigint()]),
 });
 
 interface ValidNode {
@@ -30,39 +31,35 @@ function isValidNode(node: unknown): node is ValidNode {
   );
 }
 
-export type OwnedCounterData = {
+export type PrivateCounterData = {
   id: string;
-  value: string;
+  saltHash: string;
+  valueHash: string;
   version: string;
 };
 
-function parseOwnedCounterData(
+function parsePrivateCounterData(
   contents: { json?: unknown },
   nodeAddress: string,
   nodeVersion: string | number,
-): OwnedCounterData | null {
-  if (!contents.json) {
-    consola.warn("No JSON content in node:", nodeAddress);
-    return null;
-  }
+): PrivateCounterData | null {
+  if (!contents.json) return null;
 
-  consola.info("Raw counter data:", contents.json);
-
-  const result = OwnedCounterSchema.safeParse(contents.json);
+  const result = PrivateCounterSchema.safeParse(contents.json);
   if (!result.success) {
-    consola.warn("Invalid OwnedCounter data:", result.error.format());
-    consola.warn("Raw data was:", contents.json);
+    consola.warn("Invalid PrivateCounter data:", result.error.format());
     return null;
   }
 
   return {
     id: nodeAddress,
-    value: String(result.data.value),
+    saltHash: String(result.data.salt_digest),
+    valueHash: String(result.data.value_digest),
     version: String(nodeVersion),
   };
 }
 
-export function useOwnedCounterList() {
+export function usePrivateCounterList() {
   const account = useCurrentAccount();
   const counterPackageId = useNetworkVariable("counterPackageId");
   const { network } = useSuiClientContext();
@@ -71,14 +68,14 @@ export function useOwnedCounterList() {
     url: getGraphQLUrl(network as Network),
   });
 
-  const counterType = `${counterPackageId}::owned_counter::OwnedCounter`;
+  const counterType = `${counterPackageId}::private_counter::PrivateCounter`;
 
   return useQuery({
-    queryKey: ["owned-counters", account?.address, counterType],
-    queryFn: async (): Promise<OwnedCounterData[]> => {
+    queryKey: ["private-counters", account?.address, counterType],
+    queryFn: async (): Promise<PrivateCounterData[]> => {
       if (!account?.address) return [];
 
-      consola.info("[useOwnedCounterList] Querying:", {
+      consola.info("[usePrivateCounterList] Querying:", {
         owner: account.address,
         type: counterType,
         packageId: counterPackageId,
@@ -96,17 +93,17 @@ export function useOwnedCounterList() {
         throw new Error(`GraphQL error: ${result.errors[0]?.message ?? "Unknown error"}`);
       }
 
-      const counters: OwnedCounterData[] = [];
+      const counters: PrivateCounterData[] = [];
 
       const nodes =
         (result.data as { address?: { objects?: { nodes?: unknown[] } } })?.address?.objects
           ?.nodes ?? [];
 
-      consola.info("[useOwnedCounterList] Found nodes:", nodes.length);
+      consola.info("[usePrivateCounterList] Found nodes:", nodes.length);
 
       for (const node of nodes) {
         if (isValidNode(node)) {
-          const counterData = parseOwnedCounterData(
+          const counterData = parsePrivateCounterData(
             node.contents,
             node.address,
             node.version ?? "0",
@@ -117,7 +114,7 @@ export function useOwnedCounterList() {
         }
       }
 
-      consola.info("[useOwnedCounterList] Parsed counters:", counters.length);
+      consola.info("[usePrivateCounterList] Parsed counters:", counters.length);
 
       return counters;
     },
