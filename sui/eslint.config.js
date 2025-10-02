@@ -55,6 +55,10 @@ export default [
           selector: "CallExpression[callee.object.name='console']",
           message: "console の代わりに consola を使用してください。",
         },
+        {
+          selector: "TryStatement",
+          message: "try/catch の代わりに neverthrow を使用してください。",
+        },
       ],
 
       // ========================
@@ -98,6 +102,10 @@ export default [
         {
           selector: "CallExpression[callee.object.name='console']",
           message: "console の代わりに consola を使用してください。",
+        },
+        {
+          selector: "TryStatement",
+          message: "try/catch の代わりに neverthrow を使用してください。",
         },
       ],
     },

@@ -37,18 +37,11 @@ const publicInputs = new Uint8Array([
 ]);
 
 async function testIncrement() {
-  console.log("Testing increment with known good proof...");
-  console.log("Counter ID:", counterId);
-  console.log("Package ID:", COUNTER_PACKAGE_ID);
-
   // Check current state
-  const obj = await client.getObject({
+  const _obj = await client.getObject({
     id: counterId,
     options: { showContent: true, showOwner: true },
   });
-
-  console.log("Counter owner:", obj.data?.owner);
-  console.log("Counter content:", obj.data?.content);
 
   // Build transaction
   const tx = new Transaction();
@@ -57,16 +50,9 @@ async function testIncrement() {
     package: COUNTER_PACKAGE_ID,
     arguments: [tx.object(counterId), Array.from(proof), Array.from(publicInputs)],
   })(tx);
-
-  console.log("Transaction built:");
-  const txData = tx.getData();
-  console.log("Commands:", JSON.stringify(txData.commands, null, 2));
-  console.log("Inputs:", JSON.stringify(txData.inputs, null, 2));
-
-  // Try to execute
-  console.log("\nExecuting transaction...");
+  const _txData = tx.getData();
   try {
-    const result = await client.signAndExecuteTransaction({
+    const _result = await client.signAndExecuteTransaction({
       transaction: tx,
       signer: keyInfo.keypair,
       options: {
@@ -74,12 +60,10 @@ async function testIncrement() {
         showObjectChanges: true,
       },
     });
-
-    console.log("Transaction result:", result);
-    console.log("Status:", result.effects?.status);
-  } catch (error) {
-    console.error("Transaction failed:", error);
-  }
+  } catch (_error) {}
 }
 
-testIncrement().catch(console.error);
+testIncrement().catch((error) => {
+  consola.error("Test failed:", error);
+  process.exit(1);
+});

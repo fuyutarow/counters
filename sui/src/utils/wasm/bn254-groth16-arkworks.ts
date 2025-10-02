@@ -8,6 +8,7 @@
  * Output: Arkworks compressed binary (128 bytes for proof, 32 bytes/input for public inputs)
  */
 
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { type SnarkjsProof } from "@/utils/arkworks";
 
 /**
@@ -20,17 +21,17 @@ interface BN254Groth16ArkworksModule {
 }
 
 let wasmModule: BN254Groth16ArkworksModule | null = null;
-let initPromise: Promise<void> | null = null;
+let initPromise: ResultAsync<void, Error> | null = null;
 
 /**
  * Initialize WASM module (singleton)
  */
-async function initWasm(): Promise<void> {
-  if (wasmModule) return;
+function initWasm(): ResultAsync<void, Error> {
+  if (wasmModule) return okAsync(undefined);
   if (initPromise) return initPromise;
 
-  initPromise = (async () => {
-    try {
+  initPromise = ResultAsync.fromPromise(
+    (async () => {
       const wasmResponse = await fetch(
         "/wasm/bn254-groth16-arkworks-serializer/bn254_groth16_arkworks_serializer_bg.wasm",
       );
@@ -57,10 +58,9 @@ async function initWasm(): Promise<void> {
 
       // Cleanup blob URL
       URL.revokeObjectURL(moduleUrl);
-    } catch (error) {
-      throw new Error(`WASM initialization failed: ${error}`);
-    }
-  })();
+    })(),
+    (error) => new Error(`WASM initialization failed: ${error}`),
+  );
 
   return initPromise;
 }
@@ -69,57 +69,61 @@ async function initWasm(): Promise<void> {
  * Convert BN254 Groth16 proof (JSON) to Arkworks compressed format
  *
  * @param proof Groth16 proof object (standard JSON format, curve: bn128/BN254)
- * @returns Uint8Array (128 bytes) - Arkworks compressed proof (little-endian)
+ * @returns Result<Uint8Array, Error> - Arkworks compressed proof (128 bytes, little-endian)
  */
-export async function convertBN254Groth16ProofToArkworks(proof: SnarkjsProof): Promise<Uint8Array> {
-  await initWasm();
+export function convertBN254Groth16ProofToArkworks(
+  proof: SnarkjsProof,
+): ResultAsync<Uint8Array, Error> {
+  return initWasm().andThen(() => {
+    if (!wasmModule?.convert_proof_to_arkworks) {
+      return errAsync(new Error("WASM module not properly initialized"));
+    }
 
-  if (!wasmModule?.convert_proof_to_arkworks) {
-    throw new Error("WASM module not properly initialized");
-  }
-  const proofJson = JSON.stringify(proof);
-  const bytes = wasmModule.convert_proof_to_arkworks(proofJson);
+    const proofJson = JSON.stringify(proof);
+    const bytes = wasmModule.convert_proof_to_arkworks(proofJson);
 
-  // Validate output
-  if (!(bytes instanceof Uint8Array)) {
-    throw new Error("Invalid WASM output type");
-  }
+    // Validate output
+    if (!(bytes instanceof Uint8Array)) {
+      return errAsync(new Error("Invalid WASM output type"));
+    }
 
-  if (bytes.length !== 128) {
-    throw new Error(`Invalid proof size: expected 128, got ${bytes.length}`);
-  }
+    if (bytes.length !== 128) {
+      return errAsync(new Error(`Invalid proof size: expected 128, got ${bytes.length}`));
+    }
 
-  return bytes;
+    return okAsync(bytes);
+  });
 }
 
 /**
  * Convert BN254 public inputs to Arkworks format
  *
  * @param publicInputs Array of BN254 field element strings (decimal)
- * @returns Uint8Array - Concatenated 32-byte little-endian field elements (BCS u256)
+ * @returns Result<Uint8Array, Error> - Concatenated 32-byte little-endian field elements (BCS u256)
  */
-export async function convertBN254PublicInputsToArkworks(
+export function convertBN254PublicInputsToArkworks(
   publicInputs: string[],
-): Promise<Uint8Array> {
-  await initWasm();
+): ResultAsync<Uint8Array, Error> {
+  return initWasm().andThen(() => {
+    if (!wasmModule?.convert_public_inputs_to_bytes) {
+      return errAsync(new Error("WASM module not properly initialized"));
+    }
 
-  if (!wasmModule?.convert_public_inputs_to_bytes) {
-    throw new Error("WASM module not properly initialized");
-  }
-  const inputsJson = JSON.stringify(publicInputs);
-  const bytes = wasmModule.convert_public_inputs_to_bytes(inputsJson);
+    const inputsJson = JSON.stringify(publicInputs);
+    const bytes = wasmModule.convert_public_inputs_to_bytes(inputsJson);
 
-  // Validate output
-  if (!(bytes instanceof Uint8Array)) {
-    throw new Error("Invalid WASM output type");
-  }
+    // Validate output
+    if (!(bytes instanceof Uint8Array)) {
+      return errAsync(new Error("Invalid WASM output type"));
+    }
 
-  const expectedSize = publicInputs.length * 32;
-  if (bytes.length !== expectedSize) {
-    throw new Error(`Invalid size: expected ${expectedSize}, got ${bytes.length}`);
-  }
+    const expectedSize = publicInputs.length * 32;
+    if (bytes.length !== expectedSize) {
+      return errAsync(new Error(`Invalid size: expected ${expectedSize}, got ${bytes.length}`));
+    }
 
-  return bytes;
+    return okAsync(bytes);
+  });
 }
 
 /**
@@ -132,6 +136,6 @@ export function isBN254Groth16ArkworksWasmAvailable(): boolean {
 /**
  * Preload BN254 Groth16 Arkworks WASM module (optional, for performance)
  */
-export function preloadBN254Groth16ArkworksWasm(): Promise<void> {
+export function preloadBN254Groth16ArkworksWasm(): ResultAsync<void, Error> {
   return initWasm();
 }

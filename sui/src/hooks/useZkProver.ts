@@ -6,6 +6,7 @@
  */
 
 import { useMutation } from "@tanstack/react-query";
+import { ResultAsync } from "neverthrow";
 import {
   type CircuitInputs,
   CircuitLoadError,
@@ -24,45 +25,31 @@ import {
 /**
  * Compute Poseidon hash
  */
-async function computePoseidonHash(inputs: bigint[]): Promise<bigint> {
-  try {
-    const { buildPoseidon } = await import("circomlibjs");
-    const poseidon = await buildPoseidon();
-    const hash = poseidon(inputs);
-    const hashBigInt = BigInt(poseidon.F.toString(hash));
-    return hashBigInt;
-  } catch (error) {
-    throw new PoseidonHashError("Failed to compute Poseidon hash", error);
-  }
+function computePoseidonHash(inputs: bigint[]): ResultAsync<bigint, PoseidonHashError> {
+  return ResultAsync.fromPromise(
+    (async () => {
+      const { buildPoseidon } = await import("circomlibjs");
+      const poseidon = await buildPoseidon();
+      const hash = poseidon(inputs);
+      const hashBigInt = BigInt(poseidon.F.toString(hash));
+      return hashBigInt;
+    })(),
+    (error) => new PoseidonHashError("Failed to compute Poseidon hash", error),
+  );
 }
 
 /**
- * Generate ZK proof for private counter increment
+ * Load circuit files from public directory
  */
-async function generateProof(params: ProofGenerationParams): Promise<ProofResult> {
-  try {
-    // Step 1: Compute new value hash
-    const newValue = params.oldValue + 1n;
-    const newHash = await computePoseidonHash([newValue, params.newRandomness]);
+function loadCircuitFiles(): ResultAsync<
+  { wasmFile: ArrayBuffer; zkeyFile: ArrayBuffer },
+  CircuitLoadError
+> {
+  const wasmPath = "/circuits/private_counter.wasm";
+  const zkeyPath = "/circuits/private_counter_final.zkey";
 
-    // Step 2: Prepare circuit inputs
-    // Note: Circuit uses salt for both old and new commitments
-    const circuitInputs: CircuitInputs = {
-      salt: params.salt.toString(),
-      old_value: params.oldValue.toString(),
-      salt_hash: params.saltHash.toString(),
-      old_hash: params.oldHash.toString(),
-      new_hash: newHash.toString(),
-    };
-
-    // Step 3: Load circuit files from public directory
-    const wasmPath = "/circuits/private_counter.wasm";
-    const zkeyPath = "/circuits/private_counter_final.zkey";
-
-    let wasmFile: ArrayBuffer;
-    let zkeyFile: ArrayBuffer;
-
-    try {
+  return ResultAsync.fromPromise(
+    (async () => {
       const [wasmResponse, zkeyResponse] = await Promise.all([fetch(wasmPath), fetch(zkeyPath)]);
 
       if (!wasmResponse.ok || !zkeyResponse.ok) {
@@ -71,43 +58,73 @@ async function generateProof(params: ProofGenerationParams): Promise<ProofResult
         );
       }
 
-      [wasmFile, zkeyFile] = await Promise.all([
+      const [wasmFile, zkeyFile] = await Promise.all([
         wasmResponse.arrayBuffer(),
         zkeyResponse.arrayBuffer(),
       ]);
-    } catch (error) {
-      throw new CircuitLoadError("Failed to load circuit files", error);
-    }
 
-    // Step 4: Generate proof using snarkjs (dynamic import)
-    const { groth16 } = await import("snarkjs");
-    const { proof, publicSignals } = await groth16.fullProve(
-      circuitInputs,
-      new Uint8Array(wasmFile),
-      new Uint8Array(zkeyFile),
-    );
+      return { wasmFile, zkeyFile };
+    })(),
+    (error) => new CircuitLoadError("Failed to load circuit files", error),
+  );
+}
 
-    // Step 5: Validate proof structure
-    validateProof(proof as SnarkjsProof);
+/**
+ * Generate ZK proof for private counter increment
+ */
+function generateProof(
+  params: ProofGenerationParams,
+): ResultAsync<ProofResult, PoseidonHashError | CircuitLoadError | ProofGenerationError> {
+  // Step 1: Compute new value hash
+  const newValue = params.oldValue + 1n;
 
-    // Step 6: Convert to Arkworks format
-    const proofBytes = await convertProofToArkworks(proof as SnarkjsProof);
-    const publicInputsBytes = convertPublicInputsToBytes(publicSignals);
+  return computePoseidonHash([newValue, params.newRandomness])
+    .andThen((newHash) => {
+      // Step 2: Prepare circuit inputs
+      const circuitInputs: CircuitInputs = {
+        salt: params.salt.toString(),
+        old_value: params.oldValue.toString(),
+        salt_hash: params.saltHash.toString(),
+        old_hash: params.oldHash.toString(),
+        new_hash: newHash.toString(),
+      };
 
-    return {
-      proof: proof as SnarkjsProof,
-      publicSignals,
-      newHash,
-      newValue,
-      proofBytes,
-      publicInputsBytes,
-    };
-  } catch (error) {
-    if (error instanceof PoseidonHashError || error instanceof CircuitLoadError) {
-      throw error;
-    }
-    throw new ProofGenerationError("Failed to generate proof", error);
-  }
+      // Step 3: Load circuit files
+      return loadCircuitFiles().andThen(({ wasmFile, zkeyFile }) => {
+        // Step 4: Generate proof using snarkjs
+        return ResultAsync.fromPromise(
+          (async () => {
+            const { groth16 } = await import("snarkjs");
+            const { proof, publicSignals } = await groth16.fullProve(
+              circuitInputs,
+              new Uint8Array(wasmFile),
+              new Uint8Array(zkeyFile),
+            );
+
+            // Step 5: Validate proof structure
+            validateProof(proof as SnarkjsProof);
+
+            return { proof: proof as SnarkjsProof, publicSignals, newHash, newValue };
+          })(),
+          (error) => new ProofGenerationError("Failed to generate proof", error),
+        );
+      });
+    })
+    .andThen(({ proof, publicSignals, newHash, newValue }) => {
+      // Step 6: Convert to Arkworks format
+      return convertProofToArkworks(proof).map((proofBytes) => {
+        const publicInputsBytes = convertPublicInputsToBytes(publicSignals);
+
+        return {
+          proof,
+          publicSignals,
+          newHash,
+          newValue,
+          proofBytes,
+          publicInputsBytes,
+        };
+      });
+    });
 }
 
 /**
@@ -130,6 +147,12 @@ async function generateProof(params: ProofGenerationParams): Promise<ProofResult
 export function useZkProver() {
   return useMutation({
     mutationKey: ["zkProver", "generateProof"],
-    mutationFn: generateProof,
+    mutationFn: (params: ProofGenerationParams) =>
+      generateProof(params).match(
+        (result) => result,
+        (error) => {
+          throw error;
+        },
+      ),
   });
 }

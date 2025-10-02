@@ -2,6 +2,7 @@
 
 import { formatAddress } from "@mysten/sui/utils";
 import { ExternalLink, Eye, EyeOff, Loader2, Shield } from "lucide-react";
+import { ResultAsync } from "neverthrow";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,12 +26,15 @@ export function PrivateCounter({ id }: PrivateCounterProps) {
 
   const handleIncrement = async () => {
     setError(null);
-    try {
-      await increment(id);
-      refetch();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to increment counter");
-    }
+
+    const result = await ResultAsync.fromPromise(increment(id), (err) =>
+      err instanceof Error ? err.message : "Failed to increment counter",
+    );
+
+    result.match(
+      () => refetch(),
+      (errorMsg) => setError(errorMsg),
+    );
   };
 
   if (isLoading) {

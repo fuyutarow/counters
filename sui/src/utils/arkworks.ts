@@ -10,6 +10,8 @@
  * - wasm/bn254-groth16-arkworks-serializer/src/lib.rs
  */
 
+import consola from "consola";
+import { okAsync, type ResultAsync } from "neverthrow";
 import { convertBN254Groth16ProofToArkworks } from "@/utils/wasm/bn254-groth16-arkworks";
 
 /**
@@ -94,15 +96,13 @@ function compressG2Point(
  * @param proof snarkjs proof object
  * @returns Uint8Array (128 bytes)
  */
-export async function convertProofToArkworks(proof: SnarkjsProof): Promise<Uint8Array> {
+export function convertProofToArkworks(proof: SnarkjsProof): ResultAsync<Uint8Array, Error> {
   // Try WASM first (correct implementation)
-  try {
-    const result = await convertBN254Groth16ProofToArkworks(proof);
-    return result;
-  } catch (_error) {
+  return convertBN254Groth16ProofToArkworks(proof).orElse((error) => {
+    consola.warn("WASM proof conversion failed, falling back to JS (BROKEN):", error);
     // Fall back to existing broken implementation
-    return convertProofToArkworksJS(proof);
-  }
+    return okAsync(convertProofToArkworksJS(proof));
+  });
 }
 
 /**

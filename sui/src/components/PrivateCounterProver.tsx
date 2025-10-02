@@ -2,6 +2,7 @@
 
 import { buildPoseidon } from "circomlibjs";
 import { Loader2, Shield } from "lucide-react";
+import { ResultAsync } from "neverthrow";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,53 +32,62 @@ export function PrivateCounterProver() {
   const { mutateAsync: generateProof, isPending } = useZkProver();
 
   const handleGenerateProof = async () => {
-    try {
-      // Convert inputs to bigint
-      const saltBigInt = BigInt(salt);
-      const oldValueBigInt = BigInt(oldValue);
-      const oldRandomnessBigInt = BigInt(oldRandomness);
-      const newRandomnessBigInt = BigInt(newRandomness);
+    const result = await ResultAsync.fromPromise(
+      (async () => {
+        // Convert inputs to bigint
+        const saltBigInt = BigInt(salt);
+        const oldValueBigInt = BigInt(oldValue);
+        const oldRandomnessBigInt = BigInt(oldRandomness);
+        const newRandomnessBigInt = BigInt(newRandomness);
 
-      // Compute hashes
-      const poseidon = await buildPoseidon();
-      const F = poseidon.F;
+        // Compute hashes
+        const poseidon = await buildPoseidon();
+        const F = poseidon.F;
 
-      const saltHash = BigInt(F.toString(poseidon([saltBigInt])));
-      const oldHash = BigInt(F.toString(poseidon([oldValueBigInt, oldRandomnessBigInt])));
+        const saltHash = BigInt(F.toString(poseidon([saltBigInt])));
+        const oldHash = BigInt(F.toString(poseidon([oldValueBigInt, oldRandomnessBigInt])));
 
-      // Generate proof
-      const proofResult = await generateProof({
-        salt: saltBigInt,
-        oldValue: oldValueBigInt,
-        oldRandomness: oldRandomnessBigInt,
-        newRandomness: newRandomnessBigInt,
-        saltHash,
-        oldHash,
-      });
+        // Generate proof
+        const proofResult = await generateProof({
+          salt: saltBigInt,
+          oldValue: oldValueBigInt,
+          oldRandomness: oldRandomnessBigInt,
+          newRandomness: newRandomnessBigInt,
+          saltHash,
+          oldHash,
+        });
 
-      // Convert to hex for display
-      const proofHex = Array.from(proofResult.proofBytes)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-      const publicInputsHex = Array.from(proofResult.publicInputsBytes)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+        // Convert to hex for display
+        const proofHex = Array.from(proofResult.proofBytes)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+        const publicInputsHex = Array.from(proofResult.publicInputsBytes)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
 
-      setResult({
-        newHash: proofResult.newHash.toString(),
-        newValue: proofResult.newValue.toString(),
-        proofHex,
-        publicInputsHex,
-      });
+        return {
+          newHash: proofResult.newHash.toString(),
+          newValue: proofResult.newValue.toString(),
+          proofHex,
+          publicInputsHex,
+        };
+      })(),
+      (error) => (error instanceof Error ? error.message : "Unknown error"),
+    );
 
-      toast.success("ZK Proof generated successfully!", {
-        description: `New value: ${proofResult.newValue}`,
-      });
-    } catch (error) {
-      toast.error("Failed to generate proof", {
-        description: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
+    result.match(
+      (data) => {
+        setResult(data);
+        toast.success("ZK Proof generated successfully!", {
+          description: `New value: ${data.newValue}`,
+        });
+      },
+      (errorMsg) => {
+        toast.error("Failed to generate proof", {
+          description: errorMsg,
+        });
+      },
+    );
   };
 
   return (

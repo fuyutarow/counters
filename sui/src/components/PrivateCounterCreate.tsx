@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Shield } from "lucide-react";
+import { ResultAsync } from "neverthrow";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -14,13 +15,15 @@ export function PrivateCounterCreate() {
 
   const handleCreate = async () => {
     setError(null);
-    try {
-      const result = await create();
-      // Navigate to the newly created counter page
-      router.push(`/private-counter/${result.counterId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create counter");
-    }
+
+    const result = await ResultAsync.fromPromise(create(), (err) =>
+      err instanceof Error ? err.message : "Failed to create counter",
+    );
+
+    result.match(
+      (data) => router.push(`/private-counter/${data.counterId}`),
+      (errorMsg) => setError(errorMsg),
+    );
   };
 
   return (
