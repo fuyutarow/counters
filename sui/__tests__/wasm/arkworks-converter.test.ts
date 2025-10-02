@@ -20,7 +20,7 @@ const CONVERT_PROOF_PATH = path.join(
   "..",
   "..",
   "circuits",
-  "convert-vk",
+  "bn254-groth16-arkworks-serializer",
   "target",
   "release",
   "convert-proof",
@@ -34,8 +34,8 @@ async function loadWasmModule() {
     "..",
     "public",
     "wasm",
-    "arkworks-converter",
-    "arkworks-converter_bg.wasm",
+    "bn254-groth16-arkworks-serializer",
+    "bn254_groth16_arkworks_serializer_bg.wasm",
   );
   const jsPath = path.join(
     __dirname,
@@ -43,8 +43,8 @@ async function loadWasmModule() {
     "..",
     "public",
     "wasm",
-    "arkworks-converter",
-    "arkworks-converter.js",
+    "bn254-groth16-arkworks-serializer",
+    "bn254_groth16_arkworks_serializer.js",
   );
 
   // Dynamic import for ESM
@@ -59,8 +59,14 @@ async function loadWasmModule() {
   return module;
 }
 
-describe("Arkworks WASM Converter", () => {
-  let wasmModule: any;
+interface ArkworksWasmModule {
+  default: () => Promise<void>;
+  convert_proof_to_arkworks: (proof_json: string) => Uint8Array;
+  convert_public_inputs_to_bytes: (inputs_json: string) => Uint8Array;
+}
+
+describe("BN254 Groth16 Arkworks Serializer", () => {
+  let wasmModule: ArkworksWasmModule | undefined;
   // Real proof from circuits/proofs/proof.json
   const testProof: SnarkjsProof = {
     pi_a: [
@@ -144,10 +150,10 @@ describe("Arkworks WASM Converter", () => {
       pi_c: ["1", "2", "3"],
       protocol: "groth16",
       curve: "bn128",
-    } as any;
+    };
 
     assert.throws(
-      () => wasmModule.convert_proof_to_arkworks(JSON.stringify(invalidProof)),
+      () => wasmModule?.convert_proof_to_arkworks(JSON.stringify(invalidProof)),
       /parse error|Failed to parse/i,
       "Should reject invalid proof",
     );

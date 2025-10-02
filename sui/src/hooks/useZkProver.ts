@@ -92,7 +92,7 @@ async function generateProof(params: ProofGenerationParams): Promise<ProofResult
     validateProof(proof as SnarkjsProof);
 
     // Step 6: Convert to Arkworks format
-    const proofBytes = convertProofToArkworks(proof as SnarkjsProof);
+    const proofBytes = await convertProofToArkworks(proof as SnarkjsProof);
     const publicInputsBytes = convertPublicInputsToBytes(publicSignals);
 
     return {
