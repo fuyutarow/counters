@@ -58,12 +58,13 @@ export interface ProofResult {
 
 /**
  * Circuit input format
+ * Note: Circuit uses salt for both old and new commitments (no separate randomness)
  */
 export interface CircuitInputs {
+  // Private inputs
   salt: string;
   old_value: string;
-  old_randomness: string;
-  new_randomness: string;
+  // Public inputs
   salt_hash: string;
   old_hash: string;
   new_hash: string;

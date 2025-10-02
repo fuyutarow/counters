@@ -46,11 +46,10 @@ async function generateProof(params: ProofGenerationParams): Promise<ProofResult
     const newHash = await computePoseidonHash([newValue, params.newRandomness]);
 
     // Step 2: Prepare circuit inputs
+    // Note: Circuit uses salt for both old and new commitments
     const circuitInputs: CircuitInputs = {
       salt: params.salt.toString(),
       old_value: params.oldValue.toString(),
-      old_randomness: params.oldRandomness.toString(),
-      new_randomness: params.newRandomness.toString(),
       salt_hash: params.saltHash.toString(),
       old_hash: params.oldHash.toString(),
       new_hash: newHash.toString(),

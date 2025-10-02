@@ -39,7 +39,7 @@ describe("Private Counter Reference Implementation (Node.js)", () => {
     client = new SuiClient({ url: getFullnodeUrl("testnet") });
     keyInfo = getCarol();
     poseidon = await buildPoseidon();
-  });
+  }, 30000); // 30 second timeout for setup
 
   /**
    * Helper: Execute transaction and wait for finalization

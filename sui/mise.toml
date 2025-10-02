@@ -258,7 +258,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔍 ESLintチェック中..."
-bun eslint src scripts --ext .ts,.tsx,.js --max-warnings 0
+bun eslint . --ext .ts,.tsx,.js --max-warnings 0
 echo "✅ ESLintチェック完了"
 '''
 
@@ -278,7 +278,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint src scripts --ext .ts,.tsx,.js --fix || true
+bun eslint . --ext .ts,.tsx,.js --fix || true
 echo "✅ ESLint修正完了"
 '''
 

@@ -43,8 +43,7 @@ async function initWasm(): Promise<void> {
       // Initialize WASM
       await module.default();
       wasmModule = module;
-    } catch (error) {
-      console.error("WASM initialization failed:", error);
+    } catch (_error) {
       throw new Error("Failed to initialize fastcrypto-zkp WASM module");
     }
   })();

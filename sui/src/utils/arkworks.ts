@@ -97,7 +97,8 @@ function compressG2Point(
 export async function convertProofToArkworks(proof: SnarkjsProof): Promise<Uint8Array> {
   // Try WASM first (correct implementation)
   try {
-    return await convertBN254Groth16ProofToArkworks(proof);
+    const result = await convertBN254Groth16ProofToArkworks(proof);
+    return result;
   } catch (_error) {
     // Fall back to existing broken implementation
     return convertProofToArkworksJS(proof);
