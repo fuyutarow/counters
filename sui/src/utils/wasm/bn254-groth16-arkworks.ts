@@ -14,7 +14,7 @@ import { type SnarkjsProof } from "@/utils/arkworks";
  * WASM module interface for BN254 Groth16 Arkworks serialization
  */
 interface BN254Groth16ArkworksModule {
-  default: () => Promise<void>;
+  default: (module_or_path?: WebAssembly.Module | BufferSource) => Promise<void>;
   convert_proof_to_arkworks: (proof_json: string) => Uint8Array;
   convert_public_inputs_to_bytes: (inputs_json: string) => Uint8Array;
 }
@@ -31,19 +31,34 @@ async function initWasm(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      // Dynamic import for Next.js compatibility
-      // Note: Module path will be valid after WASM build
+      const wasmResponse = await fetch(
+        "/wasm/bn254-groth16-arkworks-serializer/bn254_groth16_arkworks_serializer_bg.wasm",
+      );
+      if (!wasmResponse.ok) {
+        throw new Error(`Failed to fetch WASM: ${wasmResponse.status}`);
+      }
+      const wasmBinary = await wasmResponse.arrayBuffer();
+      const jsResponse = await fetch(
+        "/wasm/bn254-groth16-arkworks-serializer/bn254_groth16_arkworks_serializer.js",
+      );
+      if (!jsResponse.ok) {
+        throw new Error(`Failed to fetch JS module: ${jsResponse.status}`);
+      }
+      const jsCode = await jsResponse.text();
+      const moduleBlob = new Blob([jsCode], { type: "application/javascript" });
+      const moduleUrl = URL.createObjectURL(moduleBlob);
       const module = (await import(
-        /* webpackChunkName: "bn254-groth16-arkworks" */
-        /* @ts-expect-error WASM module generated at build time */
-        "/wasm/bn254-groth16-arkworks-serializer/bn254_groth16_arkworks_serializer"
+        /* webpackIgnore: true */
+        /* @vite-ignore */
+        moduleUrl
       )) as BN254Groth16ArkworksModule;
-
-      // Initialize WASM
-      await module.default();
+      await module.default(wasmBinary);
       wasmModule = module;
-    } catch (_error) {
-      throw new Error("WASM initialization failed");
+
+      // Cleanup blob URL
+      URL.revokeObjectURL(moduleUrl);
+    } catch (error) {
+      throw new Error(`WASM initialization failed: ${error}`);
     }
   })();
 

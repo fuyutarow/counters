@@ -4,6 +4,7 @@ import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import consola from "consola";
 import { increment, _new as newPrivateCounter } from "@/generated/counter/private_counter";
 import { type PrivateCounterState } from "@/lib/zkProof";
 import { useNetworkVariable } from "@/networkConfig";
@@ -16,6 +17,7 @@ interface StoredCounterData {
   value: string;
   valueHash: string;
   saltHash: string;
+  packageId: string; // Track which package this counter was created with
 }
 
 // Generate random field element (< BN254 scalar field order)
@@ -147,12 +149,13 @@ export function usePrivateCounter() {
 
       const counterId = created.objectId;
 
-      // Store secrets
+      // Store secrets with package ID
       storeCounterData(counterId, {
         salt: salt.toString(),
         value: initialValue.toString(),
         valueHash: initialValueDigestBigInt.toString(),
         saltHash: saltDigestBigInt.toString(),
+        packageId: counterPackageId,
       });
 
       return { counterId, digest: result.digest };
@@ -171,6 +174,13 @@ export function usePrivateCounter() {
       const stored = getStoredCounterData(counterId);
       if (!stored) throw new Error("Counter secrets not found");
 
+      // Validate package ID matches
+      if (stored.packageId && stored.packageId !== counterPackageId) {
+        throw new Error(
+          `Package mismatch! Counter was created with ${stored.packageId}, but current package is ${counterPackageId}. Please create a new counter.`,
+        );
+      }
+
       const salt = BigInt(stored.salt);
       const oldValue = BigInt(stored.value);
       const oldHash = BigInt(stored.valueHash);
@@ -179,8 +189,11 @@ export function usePrivateCounter() {
       // Debug: Fetch on-chain state to compare
       const onChainObj = await suiClient.getObject({
         id: counterId,
-        options: { showContent: true },
+        options: { showContent: true, showOwner: true },
       });
+
+      consola.log("[DEBUG] Counter object owner:", onChainObj.data?.owner);
+      consola.log("[DEBUG] Current wallet address:", account.address);
 
       if (onChainObj.data?.content && onChainObj.data.content.dataType === "moveObject") {
         const onChainFields = onChainObj.data.content.fields as {
@@ -204,6 +217,13 @@ export function usePrivateCounter() {
       }
 
       // Generate proof (value_digest = Poseidon(value, salt))
+      consola.log("[DEBUG] Generating proof with params:", {
+        salt: salt.toString(),
+        oldValue: oldValue.toString(),
+        oldHash: oldHash.toString(),
+        saltHash: saltHash.toString(),
+      });
+
       const proofResult = await generateProof({
         salt,
         oldValue,
@@ -213,17 +233,36 @@ export function usePrivateCounter() {
         saltHash,
       });
 
+      consola.log("[DEBUG] Proof generated:", {
+        newValue: proofResult.newValue.toString(),
+        newHash: proofResult.newHash.toString(),
+        proofBytesLength: proofResult.proofBytes.length,
+        publicInputsBytesLength: proofResult.publicInputsBytes.length,
+      });
+
       // Create transaction
       const tx = new Transaction();
+
+      consola.log("[DEBUG] Increment transaction params:", {
+        counterPackageId,
+        counterId,
+        proofBytesLength: proofResult.proofBytes.length,
+        publicInputsBytesLength: proofResult.publicInputsBytes.length,
+      });
 
       increment({
         package: counterPackageId,
         arguments: [
           tx.object(counterId),
-          proofResult.proofBytes satisfies Uint8Array as unknown as number[],
-          proofResult.publicInputsBytes satisfies Uint8Array as unknown as number[],
+          Array.from(proofResult.proofBytes),
+          Array.from(proofResult.publicInputsBytes),
         ],
       })(tx);
+
+      // Debug: Log transaction build
+      const txData = tx.getData();
+      consola.log("[DEBUG] Transaction commands:", txData.commands);
+      consola.log("[DEBUG] Transaction inputs:", txData.inputs);
 
       // Execute transaction
       const result = await executeTransaction({

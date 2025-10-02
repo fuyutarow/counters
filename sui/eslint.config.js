@@ -117,6 +117,7 @@ export default [
       "src/graphql/generated.ts",
       "src/generated/**", // @mysten/codegen generated files
       "circuits/circomlib/**", // external circom library
+      "public/wasm/**", // WASM build artifacts
     ],
   },
 ];
