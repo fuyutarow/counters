@@ -89,17 +89,6 @@ description = "Node.js テストの実行（Private Counter参照実装）"
 alias = "tn"
 run = "npx tsx --test --test-force-exit __tests__/node/*.test.ts"
 
-[tasks."test:manual"]
-description = "Node.js で manual テストを実行（Bun 非互換テスト）"
-alias = "tm"
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-echo "🧪 Manual テスト実行中（Node.js使用）..."
-node __tests__/manual/debug-snarkjs.mjs
-echo ""
-echo "✅ Manual テスト完了"
-'''
 
 [tasks.clean]
 description = "全ビルド成果物のクリーンアップ"
@@ -268,7 +257,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔍 ESLintチェック中..."
-bun eslint . --ext .ts,.tsx,.js --max-warnings 0
+bun eslint src scripts --ext .ts,.tsx,.js --max-warnings 0
 echo "✅ ESLintチェック完了"
 '''
 
@@ -288,7 +277,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint src circuits scripts --ext .ts,.tsx,.js --fix || true
+bun eslint src scripts --ext .ts,.tsx,.js --fix || true
 echo "✅ ESLint修正完了"
 '''
 

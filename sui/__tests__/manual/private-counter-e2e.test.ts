@@ -122,12 +122,19 @@ describe("Private Counter E2E", () => {
       new_hash: newHash.toString(),
     };
 
-    // Load circuit files from __tests__ directory
+    // Load circuit files from public/circuits directory
     const path = await import("node:path");
     const fs = await import("node:fs");
 
-    const wasmPath = path.join(__dirname, "private_counter.wasm");
-    const zkeyPath = path.join(__dirname, "private_counter_final.zkey");
+    const wasmPath = path.join(__dirname, "..", "..", "public", "circuits", "private_counter.wasm");
+    const zkeyPath = path.join(
+      __dirname,
+      "..",
+      "..",
+      "public",
+      "circuits",
+      "private_counter_final.zkey",
+    );
 
     const [wasmFile, zkeyFile] = await Promise.all([
       fs.promises.readFile(wasmPath),

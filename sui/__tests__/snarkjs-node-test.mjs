@@ -45,8 +45,8 @@ async function main() {
 	};
 
 	// ========== Step 3: Load circuit files ==========
-	const wasmPath = join(__dirname, "private_counter.wasm");
-	const zkeyPath = join(__dirname, "private_counter_final.zkey");
+	const wasmPath = join(__dirname, "..", "public", "circuits", "private_counter.wasm");
+	const zkeyPath = join(__dirname, "..", "public", "circuits", "private_counter_final.zkey");
 
 	console.log("\n📁 Loading circuit files:");
 	console.log("  WASM:", wasmPath);
