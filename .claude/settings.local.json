@@ -159,7 +159,8 @@
       "Bash(curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf)",
       "Bash(sh)",
       "Bash(chmod:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(git mv:*)"
     ],
     "deny": [],
     "ask": []

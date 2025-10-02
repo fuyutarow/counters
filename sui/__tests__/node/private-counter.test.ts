@@ -141,7 +141,7 @@ describe("Private Counter Reference Implementation (Node.js)", () => {
       __dirname,
       "..",
       "..",
-      "circuits",
+      "wasm",
       "bn254-groth16-arkworks-serializer",
       "target",
       "release",
