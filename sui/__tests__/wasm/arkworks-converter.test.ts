@@ -19,7 +19,7 @@ const CONVERT_PROOF_PATH = path.join(
   __dirname,
   "..",
   "..",
-  "circuits",
+  "wasm",
   "bn254-groth16-arkworks-serializer",
   "target",
   "release",

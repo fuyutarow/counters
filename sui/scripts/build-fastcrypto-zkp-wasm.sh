@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "🔨 Building WASM module for BN254 Groth16 Arkworks Serializer..."
+echo "🔨 Building WASM module for @fuyutarow/fastcrypto-zkp..."
 
-cd wasm/bn254-groth16-arkworks-serializer
+cd wasm/fastcrypto-zkp
 
 # wasm-packインストール確認
 if ! command -v wasm-pack &> /dev/null; then
@@ -15,9 +15,9 @@ fi
 echo "🏗️ Building WASM..."
 wasm-pack build \
     --target web \
-    --out-dir ../../public/wasm/bn254-groth16-arkworks-serializer \
-    --out-name bn254_groth16_arkworks_serializer
+    --out-dir ../../public/wasm/fastcrypto-zkp \
+    --out-name fastcrypto_zkp_wasm
 
 echo "✅ WASM module built successfully"
-echo "📍 Output: public/wasm/bn254-groth16-arkworks-serializer/"
-ls -lh ../../public/wasm/bn254-groth16-arkworks-serializer/
+echo "📍 Output: public/wasm/fastcrypto-zkp/"
+ls -lh ../../public/wasm/fastcrypto-zkp/

@@ -7,7 +7,7 @@
  * References:
  * - Arkworks: https://github.com/arkworks-rs/groth16
  * - Sui groth16: sui::groth16 module
- * - circuits/bn254-groth16-arkworks-serializer/src/lib.rs
+ * - wasm/bn254-groth16-arkworks-serializer/src/lib.rs
  */
 
 import { convertBN254Groth16ProofToArkworks } from "@/utils/wasm/bn254-groth16-arkworks";
@@ -56,7 +56,7 @@ function compressG1Point(point: [string, string, string]): Uint8Array {
   const xBytes = fieldElementToBytes(point[0]);
 
   // TODO: Implement proper Arkworks compression with y-sign bit
-  // For now, use Rust tool: circuits/bn254-groth16-arkworks-serializer/target/release/convert-proof
+  // For now, use Rust tool: wasm/bn254-groth16-arkworks-serializer/target/release/convert-proof
   return xBytes;
 }
 

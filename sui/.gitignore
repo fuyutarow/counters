@@ -22,4 +22,5 @@ bun.lockb
 suigen-config.local.json
 
 # WASM build artifacts
-circuits/bn254-groth16-arkworks-serializer/
+wasm/*/target/
+wasm/*/Cargo.lock
