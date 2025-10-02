@@ -5,6 +5,8 @@ import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import consola from "consola";
+import { Result } from "neverthrow";
+import { useCallback } from "react";
 import { increment, _new as newPrivateCounter } from "@/generated/counter/private_counter";
 import { type PrivateCounterState } from "@/lib/zkProof";
 import { useNetworkVariable } from "@/networkConfig";
@@ -66,41 +68,67 @@ export function usePrivateCounter() {
   const { mutateAsync: generateProof } = useZkProver();
 
   // Get stored counter data from localStorage
-  const getStoredCounterData = (counterId: string): StoredCounterData | null => {
+  const getStoredCounterData = useCallback((counterId: string): StoredCounterData | null => {
     if (typeof window === "undefined") return null;
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) return null;
-      const data = JSON.parse(stored);
-      return data[counterId] || null;
-    } catch {
-      return null;
-    }
-  };
+
+    const result = Result.fromThrowable(
+      () => {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return null;
+        const data = JSON.parse(stored);
+        return data[counterId] ?? null;
+      },
+      () => null as StoredCounterData | null,
+    )();
+
+    return result.isOk() ? result.value : null;
+  }, []);
 
   // Store counter data to localStorage
   const storeCounterData = (counterId: string, data: StoredCounterData) => {
     if (typeof window === "undefined") return;
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const allData = stored ? JSON.parse(stored) : {};
-      allData[counterId] = data;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(allData));
-    } catch (_error) {}
+
+    const result = Result.fromThrowable(
+      () => {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        const allData = stored ? JSON.parse(stored) : {};
+        allData[counterId] = data;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(allData));
+      },
+      (error) => error,
+    )();
+
+    result.mapErr((error) => {
+      consola.error("Failed to store counter data:", error);
+      throw new Error("Failed to save counter secrets to localStorage");
+    });
   };
 
-  // Get all stored counter IDs
-  const getStoredCounterIds = (): string[] => {
+  // Get all stored counter IDs (filtered by current package)
+  const getStoredCounterIds = useCallback((): string[] => {
     if (typeof window === "undefined") return [];
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) return [];
-      const data = JSON.parse(stored);
-      return Object.keys(data);
-    } catch {
-      return [];
-    }
-  };
+
+    const result = Result.fromThrowable(
+      () => {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return [];
+        const data = JSON.parse(stored) as Record<string, StoredCounterData>;
+
+        // Filter: only return counters from current package
+        return Object.entries(data)
+          .filter(([_, counterData]) => {
+            // If no packageId stored (old data), exclude it
+            if (!counterData.packageId) return false;
+            // Only include if package matches current config
+            return counterData.packageId === counterPackageId;
+          })
+          .map(([id]) => id);
+      },
+      () => [] as string[],
+    )();
+
+    return result.isOk() ? result.value : [];
+  }, [counterPackageId]);
 
   // Create new private counter
   const createCounter = useMutation({
@@ -315,17 +343,20 @@ export function usePrivateCounter() {
   };
 
   // Get local counter state
-  const getLocalCounterState = (counterId: string): PrivateCounterState | null => {
-    const stored = getStoredCounterData(counterId);
-    if (!stored) return null;
+  const getLocalCounterState = useCallback(
+    (counterId: string): PrivateCounterState | null => {
+      const stored = getStoredCounterData(counterId);
+      if (!stored) return null;
 
-    return {
-      value: BigInt(stored.value),
-      valueHash: BigInt(stored.valueHash),
-      salt: BigInt(stored.salt),
-      saltHash: BigInt(stored.saltHash),
-    };
-  };
+      return {
+        value: BigInt(stored.value),
+        valueHash: BigInt(stored.valueHash),
+        salt: BigInt(stored.salt),
+        saltHash: BigInt(stored.saltHash),
+      };
+    },
+    [getStoredCounterData],
+  );
 
   return {
     create: createCounter.mutateAsync,

@@ -12,23 +12,13 @@ import { usePrivateCounter } from "@/hooks/usePrivateCounter";
 
 export function PrivateCounterList() {
   const router = useRouter();
-  const { getLocalCounterState } = usePrivateCounter();
+  const { getLocalCounterState, getStoredCounterIds } = usePrivateCounter();
   const [counterIds, setCounterIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const stored = localStorage.getItem("privateCounters");
-      if (!stored) {
-        setCounterIds([]);
-        return;
-      }
-      const data = JSON.parse(stored);
-      setCounterIds(Object.keys(data));
-    } catch {
-      setCounterIds([]);
-    }
-  }, []);
+    // Use filtered counter IDs from hook (only current package)
+    setCounterIds(getStoredCounterIds());
+  }, [getStoredCounterIds]);
 
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text);
