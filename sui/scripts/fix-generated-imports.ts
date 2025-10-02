@@ -26,7 +26,16 @@ function fixImports(filePath: string): boolean {
   const content = readFileSync(filePath, "utf-8");
 
   // Replace .js extensions in import/export statements
-  const fixed = content.replace(/from ['"]([^'"]+)\.js['"]/g, 'from "$1"');
+  let fixed = content.replace(/from ['"]([^'"]+)\.js['"]/g, 'from "$1"');
+
+  // Fix bug in @mysten/codegen 0.5.0: Object -> object for object::ID check
+  // This fixes the case-sensitive module name check in getPureBcsSchema
+  if (filePath.includes("utils/index.ts")) {
+    fixed = fixed.replace(
+      /structTag\.module === "Object" && structTag\.name === "ID"/g,
+      'structTag.module === "object" && structTag.name === "ID"',
+    );
+  }
 
   if (fixed !== content) {
     writeFileSync(filePath, fixed, "utf-8");
