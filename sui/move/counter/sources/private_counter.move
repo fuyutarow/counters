@@ -50,10 +50,10 @@ const EInvalidPublicInputSize: vector<u8> = b"Public input size is invalid";
 public struct PrivateCounter has key, store {
     id: UID,
     // ZK proof state
-    salt_hash: u256, // Poseidon(salt) - Poseidon hash of the salt
-    value_hash: u256, // Poseidon(v, r) - Poseidon hash of value with randomness
+    salt_digest: u256, // Poseidon(salt) - Poseidon hash of the salt
+    value_digest: u256, // Poseidon(v, r) - Poseidon hash of value with randomness
     // Verifying key (circuit pinning)
-    vk_hash: u256, // Blake2b256(vk) - Blake2b256 hash of the verifying key (tamper prevention)
+    vk_digest: u256, // Blake2b256(vk) - Blake2b256 hash of the verifying key (tamper prevention)
 }
 
 // === Public Functions ===
@@ -61,28 +61,28 @@ public struct PrivateCounter has key, store {
 /// Creates a new private counter with initial value hash.
 /// Returns an owned object that can be transferred to the desired owner.
 ///
-/// @param initial_value_hash: Poseidon(v_0, r_0) - hash of initial value with randomness
+/// @param initial_value_digest: Poseidon(v_0, r_0) - hash of initial value with randomness
 /// @param salt_value: Salt value for Poseidon hashing
 /// @param verifying_key_bytes: Groth16 verifying key (serialized bytes)
 /// @param ctx: Transaction context
 /// @return: New PrivateCounter object (owned)
 public fun new(
-    initial_value_hash: u256,
+    initial_value_digest: u256,
     salt_value: u256,
     verifying_key_bytes: vector<u8>,
     ctx: &mut TxContext,
 ): PrivateCounter {
     // Compute salt hash using Poseidon
-    let salt_hash = poseidon::poseidon_bn254(&vector[salt_value]);
+    let salt_digest = poseidon::poseidon_bn254(&vector[salt_value]);
 
     // Compute verifying key hash using Blake2b256 for tamper detection
-    let vk_hash = compute_vk_hash(&verifying_key_bytes);
+    let vk_digest = compute_vk_digest(&verifying_key_bytes);
 
     PrivateCounter {
         id: object::new(ctx),
-        salt_hash,
-        value_hash: initial_value_hash,
-        vk_hash,
+        salt_digest,
+        value_digest: initial_value_digest,
+        vk_digest,
     }
 }
 
@@ -90,14 +90,14 @@ public fun new(
 /// Only the owner of this object can call this function (enforced by ownership).
 ///
 /// The proof must demonstrate:
-/// 1. Knowledge of salt: Poseidon(salt) = salt_hash
+/// 1. Knowledge of salt: Poseidon(salt) = salt_digest
 /// 2. Valid old hash: h_old = Poseidon(v, r)
 /// 3. +1 increment: h_new = Poseidon(v+1, r')
 /// 4. Range constraint: v is within valid range
 ///
 /// @param self: Mutable reference to the counter (owner only)
 /// @param proof_bytes: Groth16 proof points (serialized)
-/// @param public_inputs_bytes: Public inputs (salt_hash || h_old || h_new)
+/// @param public_inputs_bytes: Public inputs (salt_digest || h_old || h_new)
 /// @param verifying_key_bytes: Verifying key bytes (same format as used in new())
 public fun increment(
     self: &mut PrivateCounter,
@@ -106,17 +106,17 @@ public fun increment(
     verifying_key_bytes: vector<u8>,
 ) {
     // 1. Verify verifying key hasn't been tampered
-    let vk_hash = compute_vk_hash(&verifying_key_bytes);
-    assert!(self.vk_hash == vk_hash, EInvalidVerifyingKey);
+    let vk_digest = compute_vk_digest(&verifying_key_bytes);
+    assert!(self.vk_digest == vk_digest, EInvalidVerifyingKey);
 
     // 2. Parse public inputs
-    let (claimed_salt_hash, previous_hash, updated_hash) = parse_public_inputs(
+    let (claimed_salt_digest, previous_digest, updated_digest) = parse_public_inputs(
         &public_inputs_bytes,
     );
 
     // 3. Validate state consistency with on-chain state
-    assert!(self.salt_hash == claimed_salt_hash, ESaltHashMismatch);
-    assert!(self.value_hash == previous_hash, EPreviousHashMismatch);
+    assert!(self.salt_digest == claimed_salt_digest, ESaltHashMismatch);
+    assert!(self.value_digest == previous_digest, EPreviousHashMismatch);
 
     // 4. Verify ZK proof
     let is_valid_proof = verify_increment_proof(
@@ -127,40 +127,40 @@ public fun increment(
     assert!(is_valid_proof, EInvalidIncrementProof);
 
     // 5. Update value hash
-    self.value_hash = updated_hash;
+    self.value_digest = updated_digest;
 }
 
 // === View Functions ===
 
 /// Returns the current value hash (does not reveal actual value)
-public fun value_hash(self: &PrivateCounter): u256 {
-    self.value_hash
+public fun value_digest(self: &PrivateCounter): u256 {
+    self.value_digest
 }
 
 /// Returns the salt hash (Poseidon hash)
-public fun salt_hash(self: &PrivateCounter): u256 {
-    self.salt_hash
+public fun salt_digest(self: &PrivateCounter): u256 {
+    self.salt_digest
 }
 
 /// Returns the verifying key hash (Blake2b256 hash)
-public fun verifying_key_hash(self: &PrivateCounter): u256 {
-    self.vk_hash
+public fun verifying_key_digest(self: &PrivateCounter): u256 {
+    self.vk_digest
 }
 
 // === Private Helper Functions ===
 
 /// Parses public inputs from BCS-encoded bytes.
-/// Expected format: salt_hash (u256) || h_old (u256) || h_new (u256)
+/// Expected format: salt_digest (u256) || h_old (u256) || h_new (u256)
 fun parse_public_inputs(public_inputs_bytes: &vector<u8>): (u256, u256, u256) {
     let expected_len = BN254_SCALAR_FIELD_SIZE_BYTES * 3;
     assert!(public_inputs_bytes.length() == expected_len, EInvalidPublicInputSize);
 
     let mut bcs_reader = bcs::new(*public_inputs_bytes);
-    let salt_hash = bcs_reader.peel_u256();
-    let prev_hash = bcs_reader.peel_u256();
-    let updated_hash = bcs_reader.peel_u256();
+    let salt_digest = bcs_reader.peel_u256();
+    let prev_digest = bcs_reader.peel_u256();
+    let updated_digest = bcs_reader.peel_u256();
 
-    (salt_hash, prev_hash, updated_hash)
+    (salt_digest, prev_digest, updated_digest)
 }
 
 /// Verifies the Groth16 proof for +1 increment operation
@@ -189,9 +189,9 @@ fun verify_increment_proof(
 }
 
 /// Computes Blake2b256 hash of verifying key bytes and returns as u256
-fun compute_vk_hash(verifying_key_bytes: &vector<u8>): u256 {
-    let vk_hash_bytes = hash::blake2b256(verifying_key_bytes);
-    let mut bcs_reader = bcs::new(vk_hash_bytes);
+fun compute_vk_digest(verifying_key_bytes: &vector<u8>): u256 {
+    let vk_digest_bytes = hash::blake2b256(verifying_key_bytes);
+    let mut bcs_reader = bcs::new(vk_digest_bytes);
     bcs_reader.peel_u256()
 }
 
@@ -203,7 +203,7 @@ use sui::test_scenario;
 #[test_only]
 /// Creates a test counter with dummy hashes
 public fun create_test_counter(ctx: &mut TxContext): PrivateCounter {
-    let dummy_value_hash: u256 = 123456;
+    let dummy_value_digest: u256 = 123456;
     let dummy_salt: u256 = 42;
     let mut dummy_vk = vector::empty<u8>();
     let mut i = 0;
@@ -214,7 +214,7 @@ public fun create_test_counter(ctx: &mut TxContext): PrivateCounter {
     };
 
     new(
-        dummy_value_hash,
+        dummy_value_digest,
         dummy_salt,
         dummy_vk,
         ctx,
@@ -229,9 +229,9 @@ fun test_counter_creation() {
     let counter = create_test_counter(scenario.ctx());
 
     // Verify initial state
-    assert!(counter.value_hash() > 0, 0);
-    assert!(counter.salt_hash() > 0, 1);
-    assert!(counter.verifying_key_hash() > 0, 2);
+    assert!(counter.value_digest() > 0, 0);
+    assert!(counter.salt_digest() > 0, 1);
+    assert!(counter.verifying_key_digest() > 0, 2);
 
     transfer::transfer(counter, owner);
     scenario.end();
@@ -280,7 +280,7 @@ fun test_successful_increment_with_valid_proof() {
 
     // Initial values from Circom circuit test
     // old_value = 0, old_randomness = 123456789
-    let initial_value_hash: u256 =
+    let initial_value_digest: u256 =
         1434943783498835797369287247471819544927612511567472487143872361879370653035;
     let salt: u256 = 42;
 
@@ -654,7 +654,7 @@ fun test_successful_increment_with_valid_proof() {
         i = i + 1;
     };
 
-    let mut counter = new(initial_value_hash, salt, vk_bytes, scenario.ctx());
+    let mut counter = new(initial_value_digest, salt, vk_bytes, scenario.ctx());
 
     // Real Groth16 proof in Arkworks compressed format (128 bytes)
     let mut proof = vector::empty<u8>();
@@ -794,7 +794,7 @@ fun test_successful_increment_with_valid_proof() {
         i = i + 1;
     };
 
-    // Public inputs: salt_hash || old_hash || new_hash (96 bytes)
+    // Public inputs: salt_digest || old_digest || new_digest (96 bytes)
     let mut public_inputs = vector::empty<u8>();
     let public_data = vector[
         67,
@@ -911,11 +911,11 @@ fun test_successful_increment_with_valid_proof() {
     // Verify the proof and increment the counter
     counter.increment(proof, public_inputs, vk);
 
-    // Verify the value hash was updated to new_hash
+    // Verify the value hash was updated to new_digest
     // new_value = 1, new_randomness = 987654321
-    let expected_new_hash: u256 =
+    let expected_new_digest: u256 =
         20400401531609643696905782511486785523387928645650585839203663916578116811348;
-    assert!(counter.value_hash() == expected_new_hash, 0);
+    assert!(counter.value_digest() == expected_new_digest, 0);
 
     transfer::transfer(counter, owner);
     scenario.end();

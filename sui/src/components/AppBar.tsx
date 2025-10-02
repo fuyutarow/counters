@@ -29,6 +29,12 @@ export function AppBar() {
             >
               Shared Counter
             </Link>
+            <Link
+              href="/private-counter"
+              className="font-medium text-sm transition-colors hover:text-primary"
+            >
+              Private Counter
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-2">
