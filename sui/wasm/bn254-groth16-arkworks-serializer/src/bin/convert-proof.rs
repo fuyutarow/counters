@@ -45,10 +45,9 @@ fn main() {
     let output_path = &args[2];
 
     // Read snarkjs proof JSON
-    let proof_json = fs::read_to_string(input_path)
-        .expect("Failed to read input file");
-    let snarkjs_proof: SnarkjsProof = serde_json::from_str(&proof_json)
-        .expect("Failed to parse JSON");
+    let proof_json = fs::read_to_string(input_path).expect("Failed to read input file");
+    let snarkjs_proof: SnarkjsProof =
+        serde_json::from_str(&proof_json).expect("Failed to parse JSON");
 
     // Convert to arkworks Proof
     let a = parse_g1_affine(&snarkjs_proof.pi_a);
@@ -59,16 +58,21 @@ fn main() {
 
     // Serialize each component separately (compressed) and concatenate
     let mut proof_bytes = Vec::new();
-    proof.a.serialize_compressed(&mut proof_bytes)
+    proof
+        .a
+        .serialize_compressed(&mut proof_bytes)
         .expect("Failed to serialize proof.a");
-    proof.b.serialize_compressed(&mut proof_bytes)
+    proof
+        .b
+        .serialize_compressed(&mut proof_bytes)
         .expect("Failed to serialize proof.b");
-    proof.c.serialize_compressed(&mut proof_bytes)
+    proof
+        .c
+        .serialize_compressed(&mut proof_bytes)
         .expect("Failed to serialize proof.c");
 
     // Write to file
-    fs::write(output_path, &proof_bytes)
-        .expect("Failed to write output file");
+    fs::write(output_path, &proof_bytes).expect("Failed to write output file");
 
     println!("✅ Converted proof to Arkworks format");
     println!("   Input:  {}", input_path);

@@ -37,6 +37,15 @@ const nextConfig = {
           },
         ],
       },
+      {
+        source: '/circuits/:path*.wasm',
+        headers: [
+          {
+            key: 'Content-Type',
+            value: 'application/wasm',
+          },
+        ],
+      },
     ];
   },
 };
