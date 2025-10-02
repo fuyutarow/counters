@@ -4,7 +4,6 @@ import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { buildPoseidon } from "circomlibjs";
 import { increment, _new as newPrivateCounter } from "@/generated/counter/private_counter";
 import { type PrivateCounterState } from "@/lib/zkProof";
 import { useNetworkVariable } from "@/networkConfig";
@@ -110,7 +109,8 @@ export function usePrivateCounter() {
       const salt = generateRandomFieldElement();
       const initialValue = BigInt(0);
 
-      // Compute hashes using Poseidon
+      // Compute hashes using Poseidon (dynamic import for client-side only)
+      const { buildPoseidon } = await import("circomlibjs");
       const poseidon = await buildPoseidon();
 
       // value_digest = Poseidon(value, salt)
@@ -215,13 +215,14 @@ export function usePrivateCounter() {
 
       // Create transaction
       const tx = new Transaction();
+
       increment({
         package: counterPackageId,
-        arguments: {
-          self: counterId,
-          proofBytes: Array.from(proofResult.proofBytes),
-          publicInputsBytes: Array.from(proofResult.publicInputsBytes),
-        },
+        arguments: [
+          tx.object(counterId),
+          proofResult.proofBytes satisfies Uint8Array as unknown as number[],
+          proofResult.publicInputsBytes satisfies Uint8Array as unknown as number[],
+        ],
       })(tx);
 
       // Execute transaction

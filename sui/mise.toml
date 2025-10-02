@@ -46,6 +46,9 @@ NETWORK="${2:-testnet}"
 
 echo "🚀 $NETWORK への $PACKAGE の完全デプロイ開始..."
 echo ""
+echo "Step 0: Published.toml を削除中..."
+rip move/$PACKAGE/Published.toml 2>/dev/null || true
+echo ""
 echo "Step 1: $NETWORK 環境設定中..."
 mise run sui:env $NETWORK
 echo ""
@@ -64,7 +67,27 @@ echo "🎉 デプロイ完了！"
 [tasks.test]
 description = "全テストの実行（manual 除く）"
 alias = "t"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🧪 Bun テスト実行中..."
+{{mise_bin}} test:bun
+echo ""
+echo "🧪 Node.js テスト実行中..."
+{{mise_bin}} test:node
+echo ""
+echo "✅ 全テスト完了"
+'''
+
+[tasks."test:bun"]
+description = "Bunテストの実行（SEAL IBE multisig等）"
+alias = "tb"
 run = "bun test __tests__/*.test.ts"
+
+[tasks."test:node"]
+description = "Node.js テストの実行（Private Counter参照実装）"
+alias = "tn"
+run = "npx tsx --test __tests__/node/*.test.ts"
 
 [tasks."test:manual"]
 description = "Node.js で manual テストを実行（Bun 非互換テスト）"
@@ -245,7 +268,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔍 ESLintチェック中..."
-bun eslint . --ext .ts,.tsx --max-warnings 0
+bun eslint . --ext .ts,.tsx,.js --max-warnings 0
 echo "✅ ESLintチェック完了"
 '''
 
@@ -265,7 +288,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint src --ext .ts,.tsx --fix || true
+bun eslint src circuits scripts --ext .ts,.tsx,.js --fix || true
 echo "✅ ESLint修正完了"
 '''
 
@@ -354,6 +377,8 @@ PACKAGE="${1:-counter}"
 NETWORK="${2:-testnet}"
 
 echo "📦 $PACKAGE を $NETWORK にパブリッシュ中..."
+echo "🧹 Published.toml を削除中..."
+rip move/$PACKAGE/Published.toml 2>/dev/null || true
 mise run sui:env $NETWORK
 cd move/$PACKAGE
 sui client publish --gas-budget {{vars.gas_budget}}

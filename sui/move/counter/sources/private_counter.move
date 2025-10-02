@@ -40,7 +40,7 @@ const BN254_FIELD_SIZE: u256 =
 ///
 /// This VK is fixed for the circuit and must match the circuit used to generate proofs
 const VK_BYTES: vector<u8> =
-    x"e2f26dbea299f5223b646cb1fb33eadb059d9407559d7441dfd902e3a79a4d2dabb73dc17fbc13021e2471e0c08bd67d8401f52b73d6d07483794cad4778180e0c06f33bbc4c79a9cadef253a68084d382f17788f885c9afd176f7cb2f036789edf692d95cbdde46ddda5ef7d422436779445c5e66006a42761e1f12efde0018c212f3aeb785e49712e7a9353349aaf1255dfb31b7bf60723a480d9293938e19e04b37ff1453531c06b257a883eadcd53f9b41b0446225939c99c97bfa07b70a9a8635cf7cef1354218be9b03790342519b55f466b1e56e91bc7322611329d1804000000000000000c3101e80ac97fa82eec135fe95afbcff9cf7befec8dfa277a12e36c219b1e82ed89332eab2b6ddd1bd0b9f861ce203022279b2be8d67d4fad77bf14d032a299eb8e9220072a52cb826a8ef6170a1f32f3eeeea760c653c54c1217e7125260af7d8be00252792fb955a5a874d0178f921553c53d0501a2378d7bc2f64e26788d";
+    x"e2f26dbea299f5223b646cb1fb33eadb059d9407559d7441dfd902e3a79a4d2dabb73dc17fbc13021e2471e0c08bd67d8401f52b73d6d07483794cad4778180e0c06f33bbc4c79a9cadef253a68084d382f17788f885c9afd176f7cb2f036789edf692d95cbdde46ddda5ef7d422436779445c5e66006a42761e1f12efde0018c212f3aeb785e49712e7a9353349aaf1255dfb31b7bf60723a480d9293938e19c2bd27569029e222e05aa2ba30f5227260c5fe691bbea7604ecd5165f66e5e3007d3b1c77e959731d70ed0fc13357aa6b494866d6601593150710e99cf46cf1f04000000000000000c3101e80ac97fa82eec135fe95afbcff9cf7befec8dfa277a12e36c219b1e82ed89332eab2b6ddd1bd0b9f861ce203022279b2be8d67d4fad77bf14d032a299eb8e9220072a52cb826a8ef6170a1f32f3eeeea760c653c54c1217e7125260af7d8be00252792fb955a5a874d0178f921553c53d0501a2378d7bc2f64e26788d";
 
 // === Errors ===
 
@@ -262,11 +262,12 @@ fun test_successful_increment_with_valid_proof() {
 
     // Real Groth16 proof in Arkworks compressed format (128 bytes)
     // Generated using:
-    // 1. Input: { salt: "42", old_value: "0", old_randomness: "42", new_randomness: "42" }
+    // 1. Input: { salt: "42", old_value: "0", salt_hash: "...", old_hash: "...", new_hash: "..." }
     // 2. snarkjs groth16 fullprove input.json private_counter.wasm private_counter_final.zkey proof.json public.json
     // 3. Serialize proof to Arkworks format using convert-proof tool
+    // Regenerated after VK update on 2025-10-02
     let proof =
-        x"5e5e98ce059efe12c1c3e0fd0d94766b67664329e720e692e6cbbd9879a2559ac11862571f8b6cce8ec1d60f720c830752876640af6241bf55e58e4342e7e81ec77707ad6ecfd5b0d0c4c7c2226f06c26c972bfde2c8c2ef0acbf4da77747b85a7cdfbcb82e3f9acd68ad09582bec4a238c3fe6a1ceb3f3c4c5d2b098428e5ae";
+        x"a402d1cc2f96510b188e7f6a2852b3df3bd46bea5c2a4ae828ce38b88c018da3d3e11349939dd83b40676cf99b75bfcf50239f558bd56f80e4f5651dcf40a92304de8f2c403f230060619074e1b3c10adda0688cc85873ff723e436e1d139d902fea57047e4ac01edc42e3d7b6a694be6296d2b9383665da08a02cf2d5f8d78d";
 
     // Public inputs: salt_digest || old_digest || new_digest (96 bytes = 3 * 32 bytes)
     // BCS-encoded u256 values

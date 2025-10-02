@@ -143,7 +143,17 @@
       "Bash(m circom:clean:*)",
       "Bash(m circom:setup:*)",
       "Bash(m circom:copy-to-public:*)",
-      "Bash(./circuits/convert-vk/target/release/convert-proof:*)"
+      "Bash(./circuits/convert-vk/target/release/convert-proof:*)",
+      "Bash(curl -s http://localhost:3000/private-counter)",
+      "Bash(curl -s http://localhost:3000/private-counter/0x123)",
+      "Bash(awk:*)",
+      "Bash(m test:node:*)",
+      "Bash(tee:*)",
+      "Bash(bunx snarkjs groth16:*)",
+      "Bash(circuits/convert-vk/target/release/convert-proof /tmp/proof.json /tmp/proof.bin)",
+      "Bash(/home/fuyu/OPENJPY/c2/sui/circuits/convert-vk/target/release/convert-proof /tmp/proof.json /tmp/proof.bin)",
+      "Bash(/bin/grep -A 5 \"circom:copy\")",
+      "Bash(/bin/grep -A 10 \"copy\")"
     ],
     "deny": [],
     "ask": []
@@ -152,6 +162,9 @@
   "enabledMcpjsonServers": [
     "memory",
     "context7",
-    "serena"
+    "serena",
+    "time",
+    "shadcn",
+    "playwright"
   ]
 }

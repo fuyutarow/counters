@@ -7,18 +7,17 @@ include "circomlib/circuits/comparators.circom";
 ///
 /// This circuit proves:
 /// 1. Knowledge of salt: Poseidon(salt) == salt_hash
-/// 2. Valid old commitment: Poseidon(old_value, old_randomness) == old_hash
+/// 2. Valid old commitment: Poseidon(old_value, salt) == old_hash
 /// 3. +1 increment constraint: new_value == old_value + 1
-/// 4. New commitment: Poseidon(new_value, new_randomness) == new_hash
+/// 4. New commitment: Poseidon(new_value, salt) == new_hash
 /// 5. Range constraint: old_value < 2^64 (prevent overflow)
 ///
+/// Note: salt is used as the randomness for both old and new commitments
 /// Compatible with Sui's private_counter.move module
 template PrivateCounter() {
     // ========== Private Inputs (Witness) ==========
     signal input salt;
     signal input old_value;
-    signal input old_randomness;
-    signal input new_randomness;
 
     // ========== Public Inputs ==========
     signal input salt_hash;
@@ -32,10 +31,10 @@ template PrivateCounter() {
     salt_hash === salt_hasher.out;
 
     // ========== Constraint 2: Old Commitment Verification ==========
-    // Prove old_hash matches: Poseidon(old_value, old_randomness) == old_hash
+    // Prove old_hash matches: Poseidon(old_value, salt) == old_hash
     component old_hasher = Poseidon(2);
     old_hasher.inputs[0] <== old_value;
-    old_hasher.inputs[1] <== old_randomness;
+    old_hasher.inputs[1] <== salt;
     old_hash === old_hasher.out;
 
     // ========== Constraint 3: +1 Increment Enforcement ==========
@@ -44,10 +43,10 @@ template PrivateCounter() {
     new_value <== old_value + 1;
 
     // ========== Constraint 4: New Commitment Generation ==========
-    // Generate new_hash: Poseidon(new_value, new_randomness) == new_hash
+    // Generate new_hash: Poseidon(new_value, salt) == new_hash
     component new_hasher = Poseidon(2);
     new_hasher.inputs[0] <== new_value;
-    new_hasher.inputs[1] <== new_randomness;
+    new_hasher.inputs[1] <== salt;
     new_hash === new_hasher.out;
 
     // ========== Constraint 5: Range Check ==========

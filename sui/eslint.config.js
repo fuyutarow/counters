@@ -92,6 +92,15 @@ export default [
     // Apply to JavaScript files
     files: ["**/*.{js,jsx}"],
     ...js.configs.recommended,
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.object.name='console']",
+          message: "console の代わりに consola を使用してください。",
+        },
+      ],
+    },
   },
   {
     // Ignore patterns
@@ -102,10 +111,12 @@ export default [
       "out/**",
       "dist/**",
       "build/**",
+      "**/build/**",
       "**/*.d.ts",
       "move/**",
       "src/graphql/generated.ts",
       "src/generated/**", // @mysten/codegen generated files
+      "circuits/circomlib/**", // external circom library
     ],
   },
 ];
