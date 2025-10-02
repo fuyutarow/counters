@@ -51,6 +51,14 @@ export default [
           selector: "ConditionalExpression ConditionalExpression ConditionalExpression",
           message: "三項演算子のネストは1段まで。2段以上は ts-pattern を使用してください。",
         },
+        {
+          selector: "CallExpression[callee.object.name='console']",
+          message: "console の代わりに consola を使用してください。",
+        },
+        {
+          selector: "TryStatement",
+          message: "try/catch の代わりに neverthrow を使用してください。",
+        },
       ],
 
       // ========================
@@ -63,7 +71,6 @@ export default [
 
       "@typescript-eslint/no-explicit-any": "error",
 
-      // Console rules - consolaライブラリ使用を推奨
       "prefer-const": "error",
     },
   },
@@ -89,6 +96,19 @@ export default [
     // Apply to JavaScript files
     files: ["**/*.{js,jsx}"],
     ...js.configs.recommended,
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.object.name='console']",
+          message: "console の代わりに consola を使用してください。",
+        },
+        {
+          selector: "TryStatement",
+          message: "try/catch の代わりに neverthrow を使用してください。",
+        },
+      ],
+    },
   },
   {
     // Ignore patterns
@@ -99,10 +119,13 @@ export default [
       "out/**",
       "dist/**",
       "build/**",
+      "**/build/**",
       "**/*.d.ts",
       "move/**",
       "src/graphql/generated.ts",
       "src/generated/**", // @mysten/codegen generated files
+      "circuits/circomlib/**", // external circom library
+      "public/wasm/**", // WASM build artifacts
     ],
   },
 ];

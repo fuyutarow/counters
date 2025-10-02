@@ -44,7 +44,6 @@ use sui::{
         G2
     },
     group_ops::{Element, bytes},
-    hex,
     table::{Table, new}
 };
 
@@ -466,6 +465,7 @@ public fun test_create_proof(
 #[test]
 public fun test_debug_id_construction() {
     use std::debug;
+    use sui::hex;
 
     debug::print(&b"=== Move ID Construction Debug ===");
 

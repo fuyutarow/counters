@@ -7,6 +7,9 @@ default_network = "testnet"
 default_package = "counter"
 gas_budget = "100000000"
 
+[task_config]
+includes = ["mise.tasks.circom.toml"]
+
 # ===============================================
 # 🚀 主要ワークフロー（よく使うタスク）
 # ===============================================
@@ -26,7 +29,13 @@ run = "bun run dev"
 [tasks.build]
 description = "プロジェクト全体のビルド"
 alias = "b"
-depends = ["build:ui", "codegen"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+{{mise_bin}} run build:wasm
+{{mise_bin}} run codegen
+{{mise_bin}} run build:ui
+'''
 
 [tasks.deploy]
 description = "完全デプロイ（環境設定→faucet→ビルド→パブリッシュ）"
@@ -37,6 +46,9 @@ PACKAGE="${1:-counter}"
 NETWORK="${2:-testnet}"
 
 echo "🚀 $NETWORK への $PACKAGE の完全デプロイ開始..."
+echo ""
+echo "Step 0: Published.toml を削除中..."
+rip move/$PACKAGE/Published.toml 2>/dev/null || true
 echo ""
 echo "Step 1: $NETWORK 環境設定中..."
 mise run sui:env $NETWORK
@@ -54,9 +66,30 @@ echo "🎉 デプロイ完了！"
 '''
 
 [tasks.test]
-description = "全テストの実行"
+description = "全テストの実行（manual 除く）"
 alias = "t"
-run = "bun test __tests__"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🧪 Bun テスト実行中..."
+{{mise_bin}} test:bun
+echo ""
+echo "🧪 Node.js テスト実行中..."
+{{mise_bin}} test:node
+echo ""
+echo "✅ 全テスト完了"
+'''
+
+[tasks."test:bun"]
+description = "Bunテストの実行（SEAL IBE multisig等）"
+alias = "tb"
+run = "bun test __tests__/*.test.ts"
+
+[tasks."test:node"]
+description = "Node.js テストの実行（Private Counter参照実装）"
+alias = "tn"
+run = "npx tsx --test --test-force-exit __tests__/node/*.test.ts"
+
 
 [tasks.clean]
 description = "全ビルド成果物のクリーンアップ"
@@ -66,7 +99,7 @@ depends = ["clean:ui", "clean:move"]
 [tasks.install]
 description = "全依存関係のインストール"
 alias = "i"
-run = "bun install"
+run = "npm install"
 
 [tasks.up]
 description = "依存関係を最新バージョンに更新"
@@ -117,17 +150,18 @@ set -euo pipefail
 PACKAGE="${1:-counter}"
 echo "🏗️ 型定義生成中..."
 echo ""
+echo "Step 0: 既存の生成物を削除中..."
+rip src/generated || true
+echo ""
 echo "Step 1: Move サマリー生成中..."
 cd move/$PACKAGE && sui move summary && cd ../..
 echo ""
 echo "Step 2: TypeScript型定義生成中..."
 bunx @mysten/codegen generate
 echo ""
-echo "Step 3: 型インポートを修正中 (type keyword)..."
-bun biome check --write src/generated/
-echo ""
-echo "Step 4: .js拡張子を削除中..."
+echo "Step 3: .js拡張子削除とBiome自動修正中..."
 bun scripts/fix-generated-imports.ts
+bunx biome check --write src/generated
 echo ""
 echo "✅ 型定義生成完了！"
 '''
@@ -189,6 +223,8 @@ rip .next-dev || true
 rip tsconfig.tsbuildinfo || true
 rip .serena || true
 rip dist || true
+rip node_modules/|| true
+rip src/generated || true
 echo "✅ UIクリーン完了"
 '''
 
@@ -222,7 +258,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔍 ESLintチェック中..."
-bun eslint . --ext .ts,.tsx --max-warnings 0
+bun eslint . --ext .ts,.tsx,.js --max-warnings 0
 echo "✅ ESLintチェック完了"
 '''
 
@@ -242,7 +278,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint src --ext .ts,.tsx --fix || true
+bun eslint . --ext .ts,.tsx,.js --fix || true
 echo "✅ ESLint修正完了"
 '''
 
@@ -331,6 +367,8 @@ PACKAGE="${1:-counter}"
 NETWORK="${2:-testnet}"
 
 echo "📦 $PACKAGE を $NETWORK にパブリッシュ中..."
+echo "🧹 Published.toml を削除中..."
+rip move/$PACKAGE/Published.toml 2>/dev/null || true
 mise run sui:env $NETWORK
 cd move/$PACKAGE
 sui client publish --gas-budget {{vars.gas_budget}}
@@ -397,6 +435,20 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🏗️ TypeScript型定義生成中..."
-bunx sui-ts-codegen generate
+bunx @mysten/codegen generate
 echo "✅ 型定義生成完了！"
 '''
+
+# ===============================================
+# 🔧 WASM関連タスク
+# ===============================================
+
+[tasks."build:wasm"]
+description = "Arkworks WASM変換器のビルド"
+alias = "wasm"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+bash scripts/build-wasm.sh
+'''
+

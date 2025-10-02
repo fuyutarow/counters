@@ -9,7 +9,6 @@ import { getGraphQLUrl, type Network } from "@/types/network";
 
 // Zod schema for strict validation
 const OwnedCounterSchema = z.object({
-  id: z.object({ id: z.string() }),
   value: z.union([z.string(), z.number(), z.bigint()]),
 });
 
@@ -42,11 +41,17 @@ function parseOwnedCounterData(
   nodeAddress: string,
   nodeVersion: string | number,
 ): OwnedCounterData | null {
-  if (!contents.json) return null;
+  if (!contents.json) {
+    consola.warn("No JSON content in node:", nodeAddress);
+    return null;
+  }
+
+  consola.info("Raw counter data:", contents.json);
 
   const result = OwnedCounterSchema.safeParse(contents.json);
   if (!result.success) {
     consola.warn("Invalid OwnedCounter data:", result.error.format());
+    consola.warn("Raw data was:", contents.json);
     return null;
   }
 
@@ -73,6 +78,12 @@ export function useOwnedCounterList() {
     queryFn: async (): Promise<OwnedCounterData[]> => {
       if (!account?.address) return [];
 
+      consola.info("[useOwnedCounterList] Querying:", {
+        owner: account.address,
+        type: counterType,
+        packageId: counterPackageId,
+      });
+
       const result = await gqlClient.query({
         query: getOwnedCountersQuery,
         variables: {
@@ -90,6 +101,9 @@ export function useOwnedCounterList() {
       const nodes =
         (result.data as { address?: { objects?: { nodes?: unknown[] } } })?.address?.objects
           ?.nodes ?? [];
+
+      consola.info("[useOwnedCounterList] Found nodes:", nodes.length);
+
       for (const node of nodes) {
         if (isValidNode(node)) {
           const counterData = parseOwnedCounterData(
@@ -102,6 +116,8 @@ export function useOwnedCounterList() {
           }
         }
       }
+
+      consola.info("[useOwnedCounterList] Parsed counters:", counters.length);
 
       return counters;
     },

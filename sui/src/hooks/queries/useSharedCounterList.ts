@@ -9,7 +9,6 @@ import { getGraphQLUrl, type Network } from "@/types/network";
 
 // Zod schema for strict validation
 const SharedCounterSchema = z.object({
-  id: z.object({ id: z.string() }),
   value: z.union([z.string(), z.number(), z.bigint()]),
 });
 
@@ -24,11 +23,17 @@ function parseSharedCounterData(
   nodeAddress: string,
   nodeVersion: string | number,
 ): SharedCounterData | null {
-  if (!contents.json) return null;
+  if (!contents.json) {
+    consola.warn("No JSON content in SharedCounter node:", nodeAddress);
+    return null;
+  }
+
+  consola.info("Raw SharedCounter data:", contents.json);
 
   const result = SharedCounterSchema.safeParse(contents.json);
   if (!result.success) {
     consola.warn("Invalid SharedCounter data:", result.error.format());
+    consola.warn("Raw data was:", contents.json);
     return null;
   }
 
@@ -52,6 +57,11 @@ export function useSharedCounterList() {
   return useQuery({
     queryKey: ["shared-counters", counterType],
     queryFn: async (): Promise<SharedCounterData[]> => {
+      consola.info("[useSharedCounterList] Querying:", {
+        type: counterType,
+        packageId: counterPackageId,
+      });
+
       const result = await gqlClient.query({
         query: getSharedCountersQuery,
         variables: {
@@ -66,6 +76,8 @@ export function useSharedCounterList() {
       const counters: SharedCounterData[] = [];
 
       const data = result.data as { objects?: { nodes?: unknown[] } };
+      consola.info("[useSharedCounterList] Found nodes:", data?.objects?.nodes?.length ?? 0);
+
       if (data?.objects?.nodes) {
         for (const nodeItem of data.objects.nodes) {
           const node = nodeItem as {
@@ -100,6 +112,8 @@ export function useSharedCounterList() {
           }
         }
       }
+
+      consola.info("[useSharedCounterList] Parsed counters:", counters.length);
 
       return counters;
     },
