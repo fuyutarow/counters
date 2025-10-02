@@ -6,9 +6,38 @@ const nextConfig = {
     optimizePackageImports: ["@mysten/dapp-kit"],
   },
   transpilePackages: ["@mysten/dapp-kit"],
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.externals.push("pino-pretty", "lokijs", "encoding");
+
+    // WASM support
+    config.experiments = {
+      ...config.experiments,
+      asyncWebAssembly: true,
+      layers: true,
+    };
+
+    // Ensure WASM files are properly handled
+    config.module.rules.push({
+      test: /\.wasm$/,
+      type: 'webassembly/async',
+    });
+
     return config;
+  },
+
+  // Static file serving for WASM
+  async headers() {
+    return [
+      {
+        source: '/wasm/:path*',
+        headers: [
+          {
+            key: 'Content-Type',
+            value: 'application/wasm',
+          },
+        ],
+      },
+    ];
   },
 };
 

@@ -10,6 +10,8 @@
  * - circuits/convert-vk/src/bin/convert-proof.rs
  */
 
+import { convertProofToArkworksWASM } from "@/utils/wasm/arkworks-converter";
+
 /**
  * snarkjs proof format
  */
@@ -92,7 +94,21 @@ function compressG2Point(
  * @param proof snarkjs proof object
  * @returns Uint8Array (128 bytes)
  */
-export function convertProofToArkworks(proof: SnarkjsProof): Uint8Array {
+export async function convertProofToArkworks(proof: SnarkjsProof): Promise<Uint8Array> {
+  // Try WASM first (correct implementation)
+  try {
+    return await convertProofToArkworksWASM(proof);
+  } catch (_error) {
+    // Fall back to existing broken implementation
+    return convertProofToArkworksJS(proof);
+  }
+}
+
+/**
+ * JavaScript fallback implementation (BROKEN - do not use for production)
+ * @deprecated Use WASM implementation instead
+ */
+function convertProofToArkworksJS(proof: SnarkjsProof): Uint8Array {
   const piA = compressG1Point(proof.pi_a);
   const piB = compressG2Point(proof.pi_b);
   const piC = compressG1Point(proof.pi_c);

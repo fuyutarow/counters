@@ -3,6 +3,13 @@ name = "convert-vk"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "convert-proof"
+path = "src/bin/convert-proof.rs"
+
 [dependencies]
 ark-bn254 = "0.4"
 ark-groth16 = "0.4"
@@ -12,3 +19,12 @@ ark-ec = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz"]
