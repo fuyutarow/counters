@@ -5,7 +5,7 @@ const { networkConfig, useNetworkVariable, useNetworkVariables } = createNetwork
   testnet: {
     url: getFullnodeUrl("testnet"),
     variables: {
-      counterPackageId: "0x4084e58554dde94c911062d6adce834ce56ded86ad7cc07f2bcbd84117c2d47d",
+      counterPackageId: "0x8773ad4142fe6e85dbdb6c178d956ac50ce56f09938bd10e6721e59d0a1052b4",
       sealPackageId: "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50",
       suiPackageId: "0x2",
     },

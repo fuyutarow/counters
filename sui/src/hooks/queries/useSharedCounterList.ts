@@ -23,11 +23,17 @@ function parseSharedCounterData(
   nodeAddress: string,
   nodeVersion: string | number,
 ): SharedCounterData | null {
-  if (!contents.json) return null;
+  if (!contents.json) {
+    consola.warn("No JSON content in SharedCounter node:", nodeAddress);
+    return null;
+  }
+
+  consola.info("Raw SharedCounter data:", contents.json);
 
   const result = SharedCounterSchema.safeParse(contents.json);
   if (!result.success) {
     consola.warn("Invalid SharedCounter data:", result.error.format());
+    consola.warn("Raw data was:", contents.json);
     return null;
   }
 

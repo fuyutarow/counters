@@ -6,8 +6,6 @@
  */
 
 import { useMutation } from "@tanstack/react-query";
-import { buildPoseidon } from "circomlibjs";
-import { groth16 } from "snarkjs";
 import {
   type CircuitInputs,
   CircuitLoadError,
@@ -28,6 +26,7 @@ import {
  */
 async function computePoseidonHash(inputs: bigint[]): Promise<bigint> {
   try {
+    const { buildPoseidon } = await import("circomlibjs");
     const poseidon = await buildPoseidon();
     const hash = poseidon(inputs);
     const hashBigInt = BigInt(poseidon.F.toString(hash));
@@ -80,6 +79,9 @@ async function generateProof(params: ProofGenerationParams): Promise<ProofResult
     } catch (error) {
       throw new CircuitLoadError("Failed to load circuit files", error);
     }
+
+    // Step 4: Generate proof using snarkjs (dynamic import)
+    const { groth16 } = await import("snarkjs");
     const { proof, publicSignals } = await groth16.fullProve(
       circuitInputs,
       new Uint8Array(wasmFile),

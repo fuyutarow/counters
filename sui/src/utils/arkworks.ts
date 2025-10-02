@@ -41,14 +41,20 @@ function fieldElementToBytes(element: string): Uint8Array {
  *
  * Arkworks compressed format for BN254 G1:
  * - 32 bytes for x-coordinate (big-endian)
- * - Compression flag in MSB (not needed for our use case)
+ * - MSB contains compression flags (sign bit for y)
+ *
+ * NOTE: This is a simplified implementation that does NOT match Arkworks.
+ * For production, use the Rust convert-proof tool instead.
+ * This implementation will NOT produce valid proofs for on-chain verification.
  */
 function compressG1Point(point: [string, string, string]): Uint8Array {
   // snarkjs format: [x, y, 1]
-  // We only need the x-coordinate for compressed form
+  // Arkworks uses serialize_compressed which encodes y's sign in x's MSB
+  // This simplified version only uses x (INCORRECT but matches old behavior)
   const xBytes = fieldElementToBytes(point[0]);
 
-  // For BN254, compressed G1 is 32 bytes (x-coordinate only)
+  // TODO: Implement proper Arkworks compression with y-sign bit
+  // For now, use Rust tool: circuits/convert-vk/target/release/convert-proof
   return xBytes;
 }
 
@@ -102,10 +108,10 @@ export function convertProofToArkworks(proof: SnarkjsProof): Uint8Array {
 /**
  * Convert public inputs to bytes for Sui Move
  *
- * Each public input is a BN254 field element (32 bytes, little-endian)
+ * Each public input is a BN254 field element encoded as BCS u256 (32 bytes, little-endian)
  *
  * @param publicInputs Array of field element strings
- * @returns Uint8Array (32 * publicInputs.length bytes)
+ * @returns Uint8Array BCS-encoded concatenation of u256 values
  */
 export function convertPublicInputsToBytes(publicInputs: string[]): Uint8Array {
   const result = new Uint8Array(publicInputs.length * 32);
@@ -118,7 +124,7 @@ export function convertPublicInputsToBytes(publicInputs: string[]): Uint8Array {
     const value = BigInt(input);
     const bytes = new Uint8Array(32);
 
-    // Convert to little-endian bytes (as expected by Sui groth16 module)
+    // Convert to little-endian bytes (BCS u256 encoding)
     for (let j = 0; j < 32; j++) {
       bytes[j] = Number((value >> BigInt(j * 8)) & 0xffn);
     }
