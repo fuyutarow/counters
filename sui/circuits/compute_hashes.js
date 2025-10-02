@@ -1,5 +1,6 @@
 // Compute Poseidon hashes for Circom input
 import { buildPoseidon } from "circomlibjs";
+import consola from "consola";
 
 async function main() {
   const poseidon = await buildPoseidon();
@@ -15,10 +16,10 @@ async function main() {
   const oldHash = poseidon.F.toString(poseidon([oldValue, oldRandomness]));
   const newHash = poseidon.F.toString(poseidon([oldValue + BigInt(1), newRandomness]));
 
-  console.log("Computed Poseidon Hashes:");
-  console.log("salt_hash:", saltHash);
-  console.log("old_hash:", oldHash);
-  console.log("new_hash:", newHash);
+  consola.log("Computed Poseidon Hashes:");
+  consola.log("salt_hash:", saltHash);
+  consola.log("old_hash:", oldHash);
+  consola.log("new_hash:", newHash);
 
   // Generate input.json
   const input = {
@@ -31,8 +32,8 @@ async function main() {
     new_hash: newHash
   };
 
-  console.log("\ninput.json:");
-  console.log(JSON.stringify(input, null, 2));
+  consola.log("\ninput.json:");
+  consola.log(JSON.stringify(input, null, 2));
 }
 
-main().catch(console.error);
+main().catch(consola.error);

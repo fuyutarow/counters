@@ -1,5 +1,6 @@
 // Format Groth16 proof for Sui Move test
 import { readFileSync } from 'fs';
+import consola from 'consola';
 
 // Read generated files
 const proof = JSON.parse(readFileSync('proofs/proof.json', 'utf8'));
@@ -58,21 +59,21 @@ const proofBytes = formatProofBytes();
 const publicInputsBytes = formatPublicInputsBytes();
 const vkBytes = formatVKBytes();
 
-console.log("=== Sui Move Test Data ===\n");
-console.log(`Proof bytes (${proofBytes.length} bytes):`);
-console.log(JSON.stringify(proofBytes));
-console.log();
+consola.log("=== Sui Move Test Data ===\n");
+consola.log(`Proof bytes (${proofBytes.length} bytes):`);
+consola.log(JSON.stringify(proofBytes));
+consola.log();
 
-console.log(`Public inputs bytes (${publicInputsBytes.length} bytes):`);
-console.log(JSON.stringify(publicInputsBytes));
-console.log();
+consola.log(`Public inputs bytes (${publicInputsBytes.length} bytes):`);
+consola.log(JSON.stringify(publicInputsBytes));
+consola.log();
 
-console.log(`VK bytes (${vkBytes.length} bytes):`);
-console.log(JSON.stringify(vkBytes));
-console.log();
+consola.log(`VK bytes (${vkBytes.length} bytes):`);
+consola.log(JSON.stringify(vkBytes));
+consola.log();
 
-console.log("=== Move Code ===");
-console.log(`
+consola.log("=== Move Code ===");
+consola.log(`
 let mut proof = vector::empty<u8>();
 let proof_data = vector[${proofBytes.join(', ')}];
 let mut i = 0;
@@ -111,4 +112,4 @@ writeFileSync('proofs/sui_test_data.json', JSON.stringify({
   }
 }, null, 2));
 
-console.log("\n✅ Saved to proofs/sui_test_data.json");
+consola.log("\n✅ Saved to proofs/sui_test_data.json");

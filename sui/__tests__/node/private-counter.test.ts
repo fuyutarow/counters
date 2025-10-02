@@ -11,7 +11,7 @@ import assert from "node:assert";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { getFullnodeUrl, SuiClient, type SuiTransactionBlockResponse } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
@@ -40,6 +40,7 @@ describe("Private Counter Reference Implementation (Node.js)", () => {
     keyInfo = getCarol();
     poseidon = await buildPoseidon();
   });
+
 
   /**
    * Helper: Execute transaction and wait for finalization

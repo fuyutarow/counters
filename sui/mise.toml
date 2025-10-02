@@ -87,7 +87,7 @@ run = "bun test __tests__/*.test.ts"
 [tasks."test:node"]
 description = "Node.js テストの実行（Private Counter参照実装）"
 alias = "tn"
-run = "npx tsx --test __tests__/node/*.test.ts"
+run = "npx tsx --test --test-force-exit __tests__/node/*.test.ts"
 
 [tasks."test:manual"]
 description = "Node.js で manual テストを実行（Bun 非互換テスト）"

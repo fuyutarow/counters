@@ -7,6 +7,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPoseidon } from "circomlibjs";
+import consola from "consola";
 import { groth16 } from "snarkjs";
 import { bytesToHex, convertProofToArkworks, type SnarkjsProof } from "../src/utils/arkworks";
 
@@ -44,7 +45,7 @@ async function main() {
   const _oldHashStr = poseidon.F.toString(oldHash);
   const start = Date.now();
 
-  const { proof, publicSignals } = await groth16.fullProve(MOVE_TEST_INPUTS, WASM_PATH, ZKEY_PATH);
+  const { proof } = await groth16.fullProve(MOVE_TEST_INPUTS, WASM_PATH, ZKEY_PATH);
 
   const _elapsed = Date.now() - start;
   const nodeProofBytes = convertProofToArkworks(proof as SnarkjsProof);
@@ -65,4 +66,4 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+main().catch(consola.error);
