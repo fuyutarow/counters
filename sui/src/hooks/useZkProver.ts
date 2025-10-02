@@ -6,6 +6,7 @@
  */
 
 import { useMutation } from "@tanstack/react-query";
+import consola from "consola";
 import { ResultAsync } from "neverthrow";
 import {
   type CircuitInputs,
@@ -94,11 +95,20 @@ function generateProof(
         // Step 4: Generate proof using snarkjs
         return ResultAsync.fromPromise(
           (async () => {
+            const startTime = performance.now();
+            consola.info("[ZK Proof] Starting proof generation...");
+
             const { groth16 } = await import("snarkjs");
             const { proof, publicSignals } = await groth16.fullProve(
               circuitInputs,
               new Uint8Array(wasmFile),
               new Uint8Array(zkeyFile),
+            );
+
+            const endTime = performance.now();
+            const provingTime = endTime - startTime;
+            consola.success(
+              `[ZK Proof] Proof generation completed in ${provingTime.toFixed(2)}ms (${(provingTime / 1000).toFixed(2)}s)`,
             );
 
             // Step 5: Validate proof structure
