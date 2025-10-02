@@ -51,6 +51,10 @@ export default [
           selector: "ConditionalExpression ConditionalExpression ConditionalExpression",
           message: "三項演算子のネストは1段まで。2段以上は ts-pattern を使用してください。",
         },
+        {
+          selector: "CallExpression[callee.object.name='console']",
+          message: "console の代わりに consola を使用してください。",
+        },
       ],
 
       // ========================
@@ -63,7 +67,6 @@ export default [
 
       "@typescript-eslint/no-explicit-any": "error",
 
-      // Console rules - consolaライブラリ使用を推奨
       "prefer-const": "error",
     },
   },
