@@ -26,13 +26,6 @@ import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from 
 import * as object from "./deps/sui/object";
 
 const $moduleName = "@local-pkg/counter::private_counter";
-export const VerifyingKeyRegistry = new MoveStruct({
-  name: `${$moduleName}::VerifyingKeyRegistry`,
-  fields: {
-    id: object.UID,
-    vk_bytes: bcs.vector(bcs.u8()),
-  },
-});
 export const PrivateCounter = new MoveStruct({
   name: `${$moduleName}::PrivateCounter`,
   fields: {
@@ -41,33 +34,21 @@ export const PrivateCounter = new MoveStruct({
     value_digest: bcs.u256(),
   },
 });
-export interface UpdateVerifyingKeyArguments {
-  registry: RawTransactionArgument<string>;
-  vkBytes: RawTransactionArgument<number[]>;
-}
-export interface UpdateVerifyingKeyOptions {
+export interface VkBytesOptions {
   package?: string;
-  arguments:
-    | UpdateVerifyingKeyArguments
-    | [registry: RawTransactionArgument<string>, vkBytes: RawTransactionArgument<number[]>];
+  arguments?: [];
 }
 /**
- * Updates the verifying key in the registry (admin only, called once after
- * deployment)
+ * Returns the verifying key bytes for external package use This allows other
+ * packages to verify proofs using the same VK
  */
-export function updateVerifyingKey(options: UpdateVerifyingKeyOptions) {
+export function vkBytes(options: VkBytesOptions = {}) {
   const packageAddress = options.package ?? "@local-pkg/counter";
-  const argumentsTypes = [
-    `${packageAddress}::private_counter::VerifyingKeyRegistry`,
-    "vector<u8>",
-  ] satisfies string[];
-  const parameterNames = ["registry", "vkBytes"];
   return (tx: Transaction) =>
     tx.moveCall({
       package: packageAddress,
       module: "private_counter",
-      function: "update_verifying_key",
-      arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
+      function: "vk_bytes",
     });
 }
 export interface NewArguments {
@@ -104,7 +85,6 @@ export function _new(options: NewOptions) {
     });
 }
 export interface IncrementArguments {
-  registry: RawTransactionArgument<string>;
   self: RawTransactionArgument<string>;
   proofBytes: RawTransactionArgument<number[]>;
   publicInputsBytes: RawTransactionArgument<number[]>;
@@ -114,7 +94,6 @@ export interface IncrementOptions {
   arguments:
     | IncrementArguments
     | [
-        registry: RawTransactionArgument<string>,
         self: RawTransactionArgument<string>,
         proofBytes: RawTransactionArgument<number[]>,
         publicInputsBytes: RawTransactionArgument<number[]>,
@@ -131,19 +110,18 @@ export interface IncrementOptions {
  * 3.  +1 increment: h_new = Poseidon(v+1, salt)
  * 4.  Range constraint: v is within valid range
  *
- * @param registry: Shared verifying key registry @param self: Mutable reference to
- * the counter (owner only) @param proof_bytes: Groth16 proof points (serialized)
- * @param public_inputs_bytes: Public inputs (salt_digest || h_old || h_new)
+ * @param self: Mutable reference to the counter (owner only) @param proof_bytes:
+ * Groth16 proof points (serialized) @param public_inputs_bytes: Public inputs
+ * (salt_digest || h_old || h_new)
  */
 export function increment(options: IncrementOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = [
-    `${packageAddress}::private_counter::VerifyingKeyRegistry`,
     `${packageAddress}::private_counter::PrivateCounter`,
     "vector<u8>",
     "vector<u8>",
   ] satisfies string[];
-  const parameterNames = ["registry", "self", "proofBytes", "publicInputsBytes"];
+  const parameterNames = ["self", "proofBytes", "publicInputsBytes"];
   return (tx: Transaction) =>
     tx.moveCall({
       package: packageAddress,

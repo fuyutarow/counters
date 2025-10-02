@@ -465,6 +465,7 @@ public fun test_create_proof(
 #[test]
 public fun test_debug_id_construction() {
     use std::debug;
+    use sui::hex;
 
     debug::print(&b"=== Move ID Construction Debug ===");
 

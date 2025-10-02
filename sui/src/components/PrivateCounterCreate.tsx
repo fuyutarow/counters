@@ -15,9 +15,9 @@ export function PrivateCounterCreate() {
   const handleCreate = async () => {
     setError(null);
     try {
-      await create();
-      // Optionally navigate to the counter page or refresh the list
-      router.refresh();
+      const result = await create();
+      // Navigate to the newly created counter page
+      router.push(`/private-counter/${result.counterId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create counter");
     }

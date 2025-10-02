@@ -29,11 +29,11 @@ describe("ZK Proof Generation with snarkjs", () => {
         old_hash: oldHash,
         new_hash: newHash,
       };
-      const wasmPath = join(__dirname, "../public/circuits/private_counter.wasm");
-      const zkeyPath = join(__dirname, "../circuits/keys/private_counter_final.zkey");
+      const wasmPath = join(__dirname, "../../public/circuits/private_counter.wasm");
+      const zkeyPath = join(__dirname, "../../circuits/keys/private_counter_final.zkey");
       const _proveStart = Date.now();
       const { proof, publicSignals } = await groth16.fullProve(inputs, wasmPath, zkeyPath);
-      const vkeyPath = join(__dirname, "../circuits/keys/private_counter_vk.json");
+      const vkeyPath = join(__dirname, "../../circuits/keys/private_counter_vk.json");
       const vkey = JSON.parse(readFileSync(vkeyPath, "utf-8"));
 
       const _verifyStart = Date.now();

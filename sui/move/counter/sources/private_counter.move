@@ -25,6 +25,23 @@ const GROTH16_PROOF_POINTS_SIZE: u64 = 192; // 3 points × 64 bytes
 const BN254_FIELD_SIZE: u256 =
     21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
+/// Verifying Key in Arkworks canonical compressed format (360 bytes)
+///
+/// Generation process:
+/// 1. Create Circom circuit: circuits/private_counter.circom
+///    - Inputs: salt (private), old_value (private)
+///    - Public outputs: salt_digest, old_hash, new_hash
+///    - Circuit enforces: new_value = old_value + 1
+/// 2. Compile circuit: circom private_counter.circom --r1cs --wasm
+/// 3. Generate powers of tau: snarkjs powersoftau new bn128 14 pot14_0000.ptau
+/// 4. Generate zkey: snarkjs groth16 setup private_counter.r1cs pot14_final.ptau private_counter_0000.zkey
+/// 5. Export verification key: snarkjs zkey export verificationkey private_counter_0000.zkey verification_key.json
+/// 6. Serialize to Arkworks format using scripts/generate-vk-bytes.ts (calls serializeVerifyingKey())
+///
+/// This VK is fixed for the circuit and must match the circuit used to generate proofs
+const VK_BYTES: vector<u8> =
+    x"e2f26dbea299f5223b646cb1fb33eadb059d9407559d7441dfd902e3a79a4d2dabb73dc17fbc13021e2471e0c08bd67d8401f52b73d6d07483794cad4778180e0c06f33bbc4c79a9cadef253a68084d382f17788f885c9afd176f7cb2f036789edf692d95cbdde46ddda5ef7d422436779445c5e66006a42761e1f12efde0018c212f3aeb785e49712e7a9353349aaf1255dfb31b7bf60723a480d9293938e19e04b37ff1453531c06b257a883eadcd53f9b41b0446225939c99c97bfa07b70a9a8635cf7cef1354218be9b03790342519b55f466b1e56e91bc7322611329d1804000000000000000c3101e80ac97fa82eec135fe95afbcff9cf7befec8dfa277a12e36c219b1e82ed89332eab2b6ddd1bd0b9f861ce203022279b2be8d67d4fad77bf14d032a299eb8e9220072a52cb826a8ef6170a1f32f3eeeea760c653c54c1217e7125260af7d8be00252792fb955a5a874d0178f921553c53d0501a2378d7bc2f64e26788d";
+
 // === Errors ===
 
 #[error]
@@ -41,13 +58,6 @@ const EInvalidPublicInputSize: vector<u8> = b"Public input size is invalid";
 
 // === Structs ===
 
-/// Registry for the verifying key used by all private counters.
-/// This is a shared object created at package initialization.
-public struct VerifyingKeyRegistry has key {
-    id: UID,
-    vk_bytes: vector<u8>, // Raw verifying key bytes for proof verification
-}
-
 /// A private counter that stores hashes instead of actual values.
 /// The actual count value is never revealed on-chain.
 /// This is a single-owner object - only the owner can increment it.
@@ -58,24 +68,13 @@ public struct PrivateCounter has key, store {
     value_digest: u256, // Poseidon(value, salt) - changes as value increments
 }
 
-// === Package Initialization ===
-
-/// Package initialization - creates the verifying key registry
-fun init(ctx: &mut TxContext) {
-    // Create empty registry - VK will be set via update_verifying_key
-    let registry = VerifyingKeyRegistry {
-        id: object::new(ctx),
-        vk_bytes: vector::empty(),
-    };
-
-    transfer::share_object(registry);
-}
-
 // === Public Functions ===
 
-/// Updates the verifying key in the registry (admin only, called once after deployment)
-public entry fun update_verifying_key(registry: &mut VerifyingKeyRegistry, vk_bytes: vector<u8>) {
-    registry.vk_bytes = vk_bytes;
+/// Returns the verifying key bytes for external package use
+/// This allows other packages to verify proofs using the same VK
+#[allow(implicit_const_copy)]
+public fun vk_bytes(): vector<u8> {
+    VK_BYTES
 }
 
 /// Creates a new private counter with initial value hash.
@@ -102,12 +101,10 @@ public fun new(initial_value_digest: u256, salt_digest: u256, ctx: &mut TxContex
 /// 3. +1 increment: h_new = Poseidon(v+1, salt)
 /// 4. Range constraint: v is within valid range
 ///
-/// @param registry: Shared verifying key registry
 /// @param self: Mutable reference to the counter (owner only)
 /// @param proof_bytes: Groth16 proof points (serialized)
 /// @param public_inputs_bytes: Public inputs (salt_digest || h_old || h_new)
 public fun increment(
-    registry: &VerifyingKeyRegistry,
     self: &mut PrivateCounter,
     proof_bytes: vector<u8>,
     public_inputs_bytes: vector<u8>,
@@ -121,9 +118,9 @@ public fun increment(
     assert!(self.salt_digest == claimed_salt_digest, ESaltHashMismatch);
     assert!(self.value_digest == previous_digest, EPreviousHashMismatch);
 
-    // 3. Verify ZK proof using VK from registry
+    // 3. Verify ZK proof using VK constant
     let is_valid_proof = verify_increment_proof(
-        &registry.vk_bytes,
+        &vk_bytes(),
         &proof_bytes,
         &public_inputs_bytes,
     );
@@ -227,12 +224,6 @@ fun test_invalid_salt_hash() {
 
     let mut counter = create_test_counter(scenario.ctx());
 
-    // Create dummy registry
-    let registry = VerifyingKeyRegistry {
-        id: object::new(scenario.ctx()),
-        vk_bytes: vector::empty(),
-    };
-
     // Try to increment with invalid proof
     let mut dummy_proof = vector::empty<u8>();
     let mut i = 0;
@@ -248,9 +239,8 @@ fun test_invalid_salt_hash() {
         i = i + 1;
     };
 
-    increment(&registry, &mut counter, dummy_proof, dummy_inputs);
+    increment(&mut counter, dummy_proof, dummy_inputs);
 
-    transfer::share_object(registry);
     transfer::transfer(counter, owner);
     scenario.end();
 }
@@ -262,642 +252,37 @@ fun test_successful_increment_with_valid_proof() {
 
     // Initial values from Circom circuit test
     // old_value = 0, salt = 42
+    // old_value_digest = Poseidon(0, 42)
     let initial_value_digest: u256 =
-        1434943783498835797369287247471819544927612511567472487143872361879370653035;
+        9904646155488355737762297645225334693069781832889131634543122060982625196787;
     let salt_digest: u256 =
-        12326503012965816391338144612242952408728683609716147019497703475006801258307; // Poseidon(salt)
-
-    // VK bytes in Arkworks canonical compressed format (360 bytes)
-    let mut vk_bytes = vector::empty<u8>();
-    let vk_data = vector[
-        226,
-        242,
-        109,
-        190,
-        162,
-        153,
-        245,
-        34,
-        59,
-        100,
-        108,
-        177,
-        251,
-        51,
-        234,
-        219,
-        5,
-        157,
-        148,
-        7,
-        85,
-        157,
-        116,
-        65,
-        223,
-        217,
-        2,
-        227,
-        167,
-        154,
-        77,
-        45,
-        171,
-        183,
-        61,
-        193,
-        127,
-        188,
-        19,
-        2,
-        30,
-        36,
-        113,
-        224,
-        192,
-        139,
-        214,
-        125,
-        132,
-        1,
-        245,
-        43,
-        115,
-        214,
-        208,
-        116,
-        131,
-        121,
-        76,
-        173,
-        71,
-        120,
-        24,
-        14,
-        12,
-        6,
-        243,
-        59,
-        188,
-        76,
-        121,
-        169,
-        202,
-        222,
-        242,
-        83,
-        166,
-        128,
-        132,
-        211,
-        130,
-        241,
-        119,
-        136,
-        248,
-        133,
-        201,
-        175,
-        209,
-        118,
-        247,
-        203,
-        47,
-        3,
-        103,
-        137,
-        237,
-        246,
-        146,
-        217,
-        92,
-        189,
-        222,
-        70,
-        221,
-        218,
-        94,
-        247,
-        212,
-        34,
-        67,
-        103,
-        121,
-        68,
-        92,
-        94,
-        102,
-        0,
-        106,
-        66,
-        118,
-        30,
-        31,
-        18,
-        239,
-        222,
-        0,
-        24,
-        194,
-        18,
-        243,
-        174,
-        183,
-        133,
-        228,
-        151,
-        18,
-        231,
-        169,
-        53,
-        51,
-        73,
-        170,
-        241,
-        37,
-        93,
-        251,
-        49,
-        183,
-        191,
-        96,
-        114,
-        58,
-        72,
-        13,
-        146,
-        147,
-        147,
-        142,
-        25,
-        126,
-        76,
-        255,
-        158,
-        215,
-        190,
-        111,
-        238,
-        221,
-        252,
-        217,
-        43,
-        153,
-        180,
-        225,
-        56,
-        175,
-        143,
-        252,
-        138,
-        132,
-        23,
-        46,
-        60,
-        241,
-        175,
-        193,
-        232,
-        181,
-        14,
-        111,
-        4,
-        89,
-        48,
-        210,
-        238,
-        198,
-        72,
-        237,
-        48,
-        23,
-        226,
-        132,
-        191,
-        14,
-        163,
-        196,
-        130,
-        170,
-        149,
-        151,
-        222,
-        106,
-        66,
-        63,
-        231,
-        156,
-        231,
-        50,
-        207,
-        179,
-        237,
-        131,
-        167,
-        4,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        12,
-        49,
-        1,
-        232,
-        10,
-        201,
-        127,
-        168,
-        46,
-        236,
-        19,
-        95,
-        233,
-        90,
-        251,
-        207,
-        249,
-        207,
-        123,
-        239,
-        236,
-        141,
-        250,
-        39,
-        122,
-        18,
-        227,
-        108,
-        33,
-        155,
-        30,
-        130,
-        237,
-        137,
-        51,
-        46,
-        171,
-        43,
-        109,
-        221,
-        27,
-        208,
-        185,
-        248,
-        97,
-        206,
-        32,
-        48,
-        34,
-        39,
-        155,
-        43,
-        232,
-        214,
-        125,
-        79,
-        173,
-        119,
-        191,
-        20,
-        208,
-        50,
-        162,
-        153,
-        235,
-        142,
-        146,
-        32,
-        7,
-        42,
-        82,
-        203,
-        130,
-        106,
-        142,
-        246,
-        23,
-        10,
-        31,
-        50,
-        243,
-        238,
-        238,
-        167,
-        96,
-        198,
-        83,
-        197,
-        76,
-        18,
-        23,
-        231,
-        18,
-        82,
-        96,
-        175,
-        125,
-        139,
-        224,
-        2,
-        82,
-        121,
-        47,
-        185,
-        85,
-        165,
-        168,
-        116,
-        208,
-        23,
-        143,
-        146,
-        21,
-        83,
-        197,
-        61,
-        5,
-        1,
-        162,
-        55,
-        141,
-        123,
-        194,
-        246,
-        78,
-        38,
-        120,
-        141,
-    ];
-    let mut i = 0;
-    while (i < 360) {
-        vk_bytes.push_back(vk_data[i]);
-        i = i + 1;
-    };
-
-    // Create registry and set VK
-    let registry = VerifyingKeyRegistry {
-        id: object::new(scenario.ctx()),
-        vk_bytes,
-    };
+        12326503012965816391338144612242952408728683609716147019497703475006801258307; // Poseidon(42)
 
     let mut counter = new(initial_value_digest, salt_digest, scenario.ctx());
 
     // Real Groth16 proof in Arkworks compressed format (128 bytes)
-    let mut proof = vector::empty<u8>();
-    let proof_data = vector[
-        110,
-        2,
-        68,
-        197,
-        247,
-        14,
-        132,
-        155,
-        144,
-        46,
-        59,
-        186,
-        122,
-        255,
-        192,
-        114,
-        29,
-        185,
-        118,
-        236,
-        84,
-        250,
-        254,
-        60,
-        88,
-        134,
-        212,
-        3,
-        196,
-        195,
-        93,
-        8,
-        213,
-        63,
-        134,
-        26,
-        180,
-        31,
-        208,
-        54,
-        249,
-        239,
-        47,
-        143,
-        120,
-        79,
-        249,
-        70,
-        232,
-        176,
-        144,
-        167,
-        83,
-        208,
-        254,
-        200,
-        62,
-        52,
-        48,
-        115,
-        114,
-        252,
-        250,
-        27,
-        222,
-        253,
-        14,
-        130,
-        243,
-        197,
-        153,
-        238,
-        146,
-        145,
-        1,
-        159,
-        136,
-        125,
-        222,
-        235,
-        95,
-        224,
-        63,
-        74,
-        216,
-        80,
-        117,
-        149,
-        96,
-        183,
-        175,
-        129,
-        125,
-        196,
-        130,
-        29,
-        65,
-        178,
-        194,
-        184,
-        155,
-        233,
-        65,
-        83,
-        144,
-        42,
-        242,
-        16,
-        42,
-        57,
-        1,
-        4,
-        195,
-        225,
-        38,
-        184,
-        45,
-        221,
-        154,
-        212,
-        193,
-        56,
-        246,
-        147,
-        86,
-        96,
-        189,
-        5,
-    ];
-    i = 0;
-    while (i < 128) {
-        proof.push_back(proof_data[i]);
-        i = i + 1;
-    };
+    // Generated using:
+    // 1. Input: { salt: "42", old_value: "0", old_randomness: "42", new_randomness: "42" }
+    // 2. snarkjs groth16 fullprove input.json private_counter.wasm private_counter_final.zkey proof.json public.json
+    // 3. Serialize proof to Arkworks format using convert-proof tool
+    let proof =
+        x"5e5e98ce059efe12c1c3e0fd0d94766b67664329e720e692e6cbbd9879a2559ac11862571f8b6cce8ec1d60f720c830752876640af6241bf55e58e4342e7e81ec77707ad6ecfd5b0d0c4c7c2226f06c26c972bfde2c8c2ef0acbf4da77747b85a7cdfbcb82e3f9acd68ad09582bec4a238c3fe6a1ceb3f3c4c5d2b098428e5ae";
 
-    // Public inputs: salt_digest || old_digest || new_digest (96 bytes)
-    let mut public_inputs = vector::empty<u8>();
-    let public_data = vector[
-        67,
-        39,
-        197,
-        178,
-        126,
-        93,
-        225,
-        221,
-        92,
-        190,
-        128,
-        133,
-        241,
-        112,
-        253,
-        101,
-        208,
-        59,
-        229,
-        177,
-        153,
-        131,
-        56,
-        113,
-        8,
-        223,
-        237,
-        235,
-        175,
-        141,
-        64,
-        27,
-        107,
-        221,
-        182,
-        82,
-        187,
-        224,
-        9,
-        9,
-        2,
-        224,
-        144,
-        38,
-        211,
-        214,
-        134,
-        27,
-        96,
-        169,
-        47,
-        133,
-        7,
-        203,
-        235,
-        210,
-        143,
-        240,
-        145,
-        19,
-        63,
-        38,
-        44,
-        3,
-        84,
-        58,
-        209,
-        202,
-        91,
-        130,
-        197,
-        58,
-        5,
-        177,
-        163,
-        126,
-        196,
-        1,
-        22,
-        108,
-        40,
-        141,
-        68,
-        99,
-        146,
-        20,
-        109,
-        212,
-        197,
-        240,
-        25,
-        96,
-        212,
-        55,
-        26,
-        45,
-    ];
-    i = 0;
-    while (i < 96) {
-        public_inputs.push_back(public_data[i]);
-        i = i + 1;
-    };
+    // Public inputs: salt_digest || old_digest || new_digest (96 bytes = 3 * 32 bytes)
+    // BCS-encoded u256 values
+    // salt_digest = Poseidon(42)
+    // old_digest = Poseidon(0, 42)
+    // new_digest = Poseidon(1, 42)
+    let public_inputs =
+        x"4327c5b27e5de1dd5cbe8085f170fd65d03be5b19983387108dfedebaf8d401bf35aab96a7d06db4ba901f1a783dd5a0cb70417fe5c0abb2e7113867c0d4e5152863fd9cd89b78affa94ad5e8d8de6572d9c9a4f9fe14a7c7061203d3bbab820";
 
     // Verify the proof and increment the counter
-    increment(&registry, &mut counter, proof, public_inputs);
-
-    transfer::share_object(registry);
+    increment(&mut counter, proof, public_inputs);
 
     // Verify the value hash was updated to new_digest
-    // new_value = 1, new_randomness = 987654321
+    // new_value = 1, new_digest = Poseidon(1, 42)
     let expected_new_digest: u256 =
-        20400401531609643696905782511486785523387928645650585839203663916578116811348;
+        14800396336478473958655799498724128728735427661463011194055900610499073368872;
     assert!(counter.value_digest() == expected_new_digest, 0);
 
     transfer::transfer(counter, owner);

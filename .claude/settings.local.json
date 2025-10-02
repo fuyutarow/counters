@@ -136,7 +136,14 @@
       "Bash(git log:*)",
       "Bash(/bin/grep -A 2 -B 2 \"codegen\")",
       "WebFetch(domain:stackoverflow.com)",
-      "Bash(m mt:*)"
+      "Bash(m mt:*)",
+      "Bash(/bin/grep -r \"published-at\" sources/)",
+      "Bash(/bin/grep -n \"proof_data = vector\\[\" /home/fuyu/OPENJPY/c2/sui/move/counter/sources/private_counter.move)",
+      "Bash(./circuits/convert-vk/target/release/convert-vk:*)",
+      "Bash(m circom:clean:*)",
+      "Bash(m circom:setup:*)",
+      "Bash(m circom:copy-to-public:*)",
+      "Bash(./circuits/convert-vk/target/release/convert-proof:*)"
     ],
     "deny": [],
     "ask": []

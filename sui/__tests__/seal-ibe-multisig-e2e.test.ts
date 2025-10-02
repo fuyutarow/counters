@@ -20,6 +20,7 @@ import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { consola } from "consola";
 import { z } from "zod";
 import * as counterPackage from "@/generated/counter/seal_ibe_multisig_counter";
+import { networkConfig } from "@/networkConfig";
 import { getKeypair } from "./utils/keybook.js";
 
 // ================================
@@ -31,7 +32,7 @@ const THRESHOLD = 2; // 2-of-3 threshold
 const THRESHOLD_RUNTIME = process.env.SEAL_TEST_THRESHOLD
   ? Number(process.env.SEAL_TEST_THRESHOLD)
   : THRESHOLD;
-const COUNTER_PACKAGE_ID = "0x428e7ca6144417cd9e6bfe9b8a8c5f6fc612a4761b5720c6f25bdc79815c453a"; // testnet counter package
+const COUNTER_PACKAGE_ID = networkConfig.testnet.variables.counterPackageId;
 
 // Session management constants
 const SESSION_KEY_TTL_MIN = 30;
@@ -787,7 +788,11 @@ const createSealIbeMultisigCounter = async (
 
   const shareOptions = {
     package: COUNTER_PACKAGE_ID,
-    arguments: [keyServerIds, publicKeys, THRESHOLD],
+    arguments: {
+      signerIds: keyServerIds,
+      signerPubkeys: publicKeys,
+      threshold: THRESHOLD,
+    },
   };
 
   counterPackage.share(shareOptions)(tx);

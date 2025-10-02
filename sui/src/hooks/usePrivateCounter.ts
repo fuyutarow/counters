@@ -41,7 +41,6 @@ export function usePrivateCounter() {
   const suiClient = useSuiClient();
   const queryClient = useQueryClient();
   const counterPackageId = useNetworkVariable("counterPackageId");
-  const vkRegistryId = useNetworkVariable("vkRegistryId");
   const { mutateAsync: executeTransaction } = useSignAndExecuteTransaction({
     execute: async ({ bytes, signature }) => {
       const executionResult = await suiClient.executeTransactionBlock({
@@ -177,6 +176,33 @@ export function usePrivateCounter() {
       const oldHash = BigInt(stored.valueHash);
       const saltHash = BigInt(stored.saltHash);
 
+      // Debug: Fetch on-chain state to compare
+      const onChainObj = await suiClient.getObject({
+        id: counterId,
+        options: { showContent: true },
+      });
+
+      if (onChainObj.data?.content && onChainObj.data.content.dataType === "moveObject") {
+        const onChainFields = onChainObj.data.content.fields as {
+          value_digest: string;
+          salt_digest: string;
+        };
+
+        // Verify salt_digest matches
+        if (onChainFields.salt_digest !== saltHash.toString()) {
+          throw new Error(
+            `Salt digest mismatch! On-chain: ${onChainFields.salt_digest}, Local: ${saltHash.toString()}`,
+          );
+        }
+
+        // Verify value_digest matches
+        if (onChainFields.value_digest !== oldHash.toString()) {
+          throw new Error(
+            `Value digest mismatch! On-chain: ${onChainFields.value_digest}, Local: ${oldHash.toString()}`,
+          );
+        }
+      }
+
       // Generate proof (value_digest = Poseidon(value, salt))
       const proofResult = await generateProof({
         salt,
@@ -192,7 +218,6 @@ export function usePrivateCounter() {
       increment({
         package: counterPackageId,
         arguments: {
-          registry: vkRegistryId,
           self: counterId,
           proofBytes: Array.from(proofResult.proofBytes),
           publicInputsBytes: Array.from(proofResult.publicInputsBytes),
@@ -237,14 +262,12 @@ export function usePrivateCounter() {
         const fields = obj.data.content.fields as {
           value_digest: string;
           salt_digest: string;
-          vk_digest: string;
         };
 
         return {
           id: counterId,
           valueHash: fields.value_digest,
           saltHash: fields.salt_digest,
-          verifyingKeyHash: fields.vk_digest,
         };
       },
       enabled: !!counterId,
