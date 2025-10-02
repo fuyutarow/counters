@@ -7,10 +7,10 @@
  * References:
  * - Arkworks: https://github.com/arkworks-rs/groth16
  * - Sui groth16: sui::groth16 module
- * - circuits/convert-vk/src/bin/convert-proof.rs
+ * - circuits/bn254-groth16-arkworks-serializer/src/lib.rs
  */
 
-import { convertProofToArkworksWASM } from "@/utils/wasm/arkworks-converter";
+import { convertBN254Groth16ProofToArkworks } from "@/utils/wasm/bn254-groth16-arkworks";
 
 /**
  * snarkjs proof format
@@ -56,7 +56,7 @@ function compressG1Point(point: [string, string, string]): Uint8Array {
   const xBytes = fieldElementToBytes(point[0]);
 
   // TODO: Implement proper Arkworks compression with y-sign bit
-  // For now, use Rust tool: circuits/convert-vk/target/release/convert-proof
+  // For now, use Rust tool: circuits/bn254-groth16-arkworks-serializer/target/release/convert-proof
   return xBytes;
 }
 
@@ -97,7 +97,7 @@ function compressG2Point(
 export async function convertProofToArkworks(proof: SnarkjsProof): Promise<Uint8Array> {
   // Try WASM first (correct implementation)
   try {
-    return await convertProofToArkworksWASM(proof);
+    return await convertBN254Groth16ProofToArkworks(proof);
   } catch (_error) {
     // Fall back to existing broken implementation
     return convertProofToArkworksJS(proof);

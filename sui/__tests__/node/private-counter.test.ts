@@ -142,7 +142,7 @@ describe("Private Counter Reference Implementation (Node.js)", () => {
       "..",
       "..",
       "circuits",
-      "convert-vk",
+      "bn254-groth16-arkworks-serializer",
       "target",
       "release",
       "convert-proof",
