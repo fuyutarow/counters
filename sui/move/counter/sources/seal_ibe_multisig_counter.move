@@ -44,7 +44,6 @@ use sui::{
         G2
     },
     group_ops::{Element, bytes},
-    hex,
     table::{Table, new}
 };
 

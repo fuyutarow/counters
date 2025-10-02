@@ -12,9 +12,7 @@ import { type SnarkjsProof } from "@/utils/arkworks";
 export interface PrivateCounterState {
   /** Current counter value (private) */
   value: bigint;
-  /** Current randomness (private) */
-  randomness: bigint;
-  /** Current value hash: Poseidon(value, randomness) */
+  /** Current value hash: Poseidon(value, salt) */
   valueHash: bigint;
   /** Salt value (private, fixed) */
   salt: bigint;
@@ -26,17 +24,17 @@ export interface PrivateCounterState {
  * Parameters for ZK proof generation
  */
 export interface ProofGenerationParams {
-  /** Salt value */
+  /** Salt value (fixed for this counter) */
   salt: bigint;
   /** Current counter value */
   oldValue: bigint;
-  /** Current randomness */
+  /** Old randomness parameter (for circuit compatibility, same as salt) */
   oldRandomness: bigint;
-  /** New randomness for next state */
+  /** New randomness parameter (for circuit compatibility, same as salt) */
   newRandomness: bigint;
-  /** Current value hash (on-chain) */
+  /** Current value hash (on-chain): Poseidon(oldValue, salt) */
   oldHash: bigint;
-  /** Salt hash (on-chain) */
+  /** Salt hash (on-chain): Poseidon(salt) */
   saltHash: bigint;
 }
 
@@ -48,7 +46,7 @@ export interface ProofResult {
   proof: SnarkjsProof;
   /** Public inputs */
   publicSignals: string[];
-  /** New value hash: Poseidon(oldValue + 1, newRandomness) */
+  /** New value hash: Poseidon(oldValue + 1, salt) */
   newHash: bigint;
   /** New value (oldValue + 1) */
   newValue: bigint;

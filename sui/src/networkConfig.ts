@@ -1,48 +1,30 @@
 import { createNetworkConfig } from "@mysten/dapp-kit";
 import { getFullnodeUrl } from "@mysten/sui/client";
 
-/**
- * デプロイ済みパッケージIDの定義
- * 新しくデプロイした場合は、ここを更新してください
- */
-const PACKAGE_IDS = {
-  testnet: {
-    counter: "0x428e7ca6144417cd9e6bfe9b8a8c5f6fc612a4761b5720c6f25bdc79815c453a",
-    seal: "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50",
-    sui: "0x2",
-  },
-  devnet: {
-    counter: "0x18903370f68278e20c29cede4a89785accc7b5299e3350b6790f1db76e4b4667",
-    sui: "0x2",
-  },
-  mainnet: {
-    counter: "", // 未デプロイ
-    sui: "0x2",
-  },
-} as const;
-
-// ネットワーク設定
 const { networkConfig, useNetworkVariable, useNetworkVariables } = createNetworkConfig({
   testnet: {
     url: getFullnodeUrl("testnet"),
     variables: {
-      counterPackageId: PACKAGE_IDS.testnet.counter,
-      sealPackageId: PACKAGE_IDS.testnet.seal,
-      suiPackageId: PACKAGE_IDS.testnet.sui,
+      counterPackageId: "0x52cc7a2752d5668afb0eda873a26ec0d9a687366ac48066760fdc5fa25656f90",
+      sealPackageId: "0x73bba649fe918ef501e2fb6ab82e83450a4c286f52cf3399e678e6da257f0c50",
+      suiPackageId: "0x2",
+      vkRegistryId: "0x7a6f532b9c0e0ee493b93592df2515fb32677143053c5ea60e007c3686dd2c3a",
     },
   },
   devnet: {
     url: getFullnodeUrl("devnet"),
     variables: {
-      counterPackageId: PACKAGE_IDS.devnet.counter,
-      suiPackageId: PACKAGE_IDS.devnet.sui,
+      counterPackageId: "0x18903370f68278e20c29cede4a89785accc7b5299e3350b6790f1db76e4b4667",
+      suiPackageId: "0x2",
+      vkRegistryId: "", // 未デプロイ
     },
   },
   mainnet: {
     url: getFullnodeUrl("mainnet"),
     variables: {
-      counterPackageId: PACKAGE_IDS.mainnet.counter,
-      suiPackageId: PACKAGE_IDS.mainnet.sui,
+      counterPackageId: "", // 未デプロイ
+      suiPackageId: "0x2",
+      vkRegistryId: "", // 未デプロイ
     },
   },
 });
@@ -52,4 +34,5 @@ export type NetworkVariables = {
   counterPackageId: string;
   sealPackageId?: string;
   suiPackageId: string;
+  vkRegistryId: string;
 };

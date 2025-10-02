@@ -26,19 +26,53 @@ import { MoveStruct, normalizeMoveArguments, type RawTransactionArgument } from 
 import * as object from "./deps/sui/object";
 
 const $moduleName = "@local-pkg/counter::private_counter";
+export const VerifyingKeyRegistry = new MoveStruct({
+  name: `${$moduleName}::VerifyingKeyRegistry`,
+  fields: {
+    id: object.UID,
+    vk_bytes: bcs.vector(bcs.u8()),
+  },
+});
 export const PrivateCounter = new MoveStruct({
   name: `${$moduleName}::PrivateCounter`,
   fields: {
     id: object.UID,
     salt_digest: bcs.u256(),
     value_digest: bcs.u256(),
-    vk_digest: bcs.u256(),
   },
 });
+export interface UpdateVerifyingKeyArguments {
+  registry: RawTransactionArgument<string>;
+  vkBytes: RawTransactionArgument<number[]>;
+}
+export interface UpdateVerifyingKeyOptions {
+  package?: string;
+  arguments:
+    | UpdateVerifyingKeyArguments
+    | [registry: RawTransactionArgument<string>, vkBytes: RawTransactionArgument<number[]>];
+}
+/**
+ * Updates the verifying key in the registry (admin only, called once after
+ * deployment)
+ */
+export function updateVerifyingKey(options: UpdateVerifyingKeyOptions) {
+  const packageAddress = options.package ?? "@local-pkg/counter";
+  const argumentsTypes = [
+    `${packageAddress}::private_counter::VerifyingKeyRegistry`,
+    "vector<u8>",
+  ] satisfies string[];
+  const parameterNames = ["registry", "vkBytes"];
+  return (tx: Transaction) =>
+    tx.moveCall({
+      package: packageAddress,
+      module: "private_counter",
+      function: "update_verifying_key",
+      arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
+    });
+}
 export interface NewArguments {
   initialValueDigest: RawTransactionArgument<number | bigint>;
-  saltValue: RawTransactionArgument<number | bigint>;
-  verifyingKeyBytes: RawTransactionArgument<number[]>;
+  saltDigest: RawTransactionArgument<number | bigint>;
 }
 export interface NewOptions {
   package?: string;
@@ -46,23 +80,21 @@ export interface NewOptions {
     | NewArguments
     | [
         initialValueDigest: RawTransactionArgument<number | bigint>,
-        saltValue: RawTransactionArgument<number | bigint>,
-        verifyingKeyBytes: RawTransactionArgument<number[]>,
+        saltDigest: RawTransactionArgument<number | bigint>,
       ];
 }
 /**
  * Creates a new private counter with initial value hash. Returns an owned object
  * that can be transferred to the desired owner.
  *
- * @param initial_value_digest: Poseidon(v_0, r_0) - hash of initial value with
- * randomness @param salt_value: Salt value for Poseidon hashing @param
- * verifying_key_bytes: Groth16 verifying key (serialized bytes) @param ctx:
+ * @param initial_value_digest: Poseidon(v_0, salt) - hash of initial value with
+ * salt @param salt_digest: Poseidon(salt) - hash of the salt value @param ctx:
  * Transaction context @return: New PrivateCounter object (owned)
  */
 export function _new(options: NewOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
-  const argumentsTypes = ["u256", "u256", "vector<u8>"] satisfies string[];
-  const parameterNames = ["initialValueDigest", "saltValue", "verifyingKeyBytes"];
+  const argumentsTypes = ["u256", "u256"] satisfies string[];
+  const parameterNames = ["initialValueDigest", "saltDigest"];
   return (tx: Transaction) =>
     tx.moveCall({
       package: packageAddress,
@@ -72,20 +104,20 @@ export function _new(options: NewOptions) {
     });
 }
 export interface IncrementArguments {
+  registry: RawTransactionArgument<string>;
   self: RawTransactionArgument<string>;
   proofBytes: RawTransactionArgument<number[]>;
   publicInputsBytes: RawTransactionArgument<number[]>;
-  verifyingKeyBytes: RawTransactionArgument<number[]>;
 }
 export interface IncrementOptions {
   package?: string;
   arguments:
     | IncrementArguments
     | [
+        registry: RawTransactionArgument<string>,
         self: RawTransactionArgument<string>,
         proofBytes: RawTransactionArgument<number[]>,
         publicInputsBytes: RawTransactionArgument<number[]>,
-        verifyingKeyBytes: RawTransactionArgument<number[]>,
       ];
 }
 /**
@@ -95,24 +127,23 @@ export interface IncrementOptions {
  * The proof must demonstrate:
  *
  * 1.  Knowledge of salt: Poseidon(salt) = salt_digest
- * 2.  Valid old hash: h_old = Poseidon(v, r)
- * 3.  +1 increment: h_new = Poseidon(v+1, r')
+ * 2.  Valid old hash: h_old = Poseidon(v, salt)
+ * 3.  +1 increment: h_new = Poseidon(v+1, salt)
  * 4.  Range constraint: v is within valid range
  *
- * @param self: Mutable reference to the counter (owner only) @param proof_bytes:
- * Groth16 proof points (serialized) @param public_inputs_bytes: Public inputs
- * (salt_digest || h_old || h_new) @param verifying_key_bytes: Verifying key bytes
- * (same format as used in new())
+ * @param registry: Shared verifying key registry @param self: Mutable reference to
+ * the counter (owner only) @param proof_bytes: Groth16 proof points (serialized)
+ * @param public_inputs_bytes: Public inputs (salt_digest || h_old || h_new)
  */
 export function increment(options: IncrementOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = [
+    `${packageAddress}::private_counter::VerifyingKeyRegistry`,
     `${packageAddress}::private_counter::PrivateCounter`,
     "vector<u8>",
     "vector<u8>",
-    "vector<u8>",
   ] satisfies string[];
-  const parameterNames = ["self", "proofBytes", "publicInputsBytes", "verifyingKeyBytes"];
+  const parameterNames = ["registry", "self", "proofBytes", "publicInputsBytes"];
   return (tx: Transaction) =>
     tx.moveCall({
       package: packageAddress,
@@ -158,26 +189,6 @@ export function saltDigest(options: SaltDigestOptions) {
       package: packageAddress,
       module: "private_counter",
       function: "salt_digest",
-      arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
-    });
-}
-export interface VerifyingKeyDigestArguments {
-  self: RawTransactionArgument<string>;
-}
-export interface VerifyingKeyDigestOptions {
-  package?: string;
-  arguments: VerifyingKeyDigestArguments | [self: RawTransactionArgument<string>];
-}
-/** Returns the verifying key hash (Blake2b256 hash) */
-export function verifyingKeyDigest(options: VerifyingKeyDigestOptions) {
-  const packageAddress = options.package ?? "@local-pkg/counter";
-  const argumentsTypes = [`${packageAddress}::private_counter::PrivateCounter`] satisfies string[];
-  const parameterNames = ["self"];
-  return (tx: Transaction) =>
-    tx.moveCall({
-      package: packageAddress,
-      module: "private_counter",
-      function: "verifying_key_digest",
       arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }

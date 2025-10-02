@@ -155,12 +155,7 @@ export function PrivateCounter({ id }: PrivateCounterProps) {
                   <span className="font-bold text-green-600">{localState.value.toString()}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Randomness:</span>
-                  <br />
-                  <span className="break-all">{localState.randomness.toString()}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Salt:</span>
+                  <span className="text-muted-foreground">Salt (fixed):</span>
                   <br />
                   <span className="break-all">{localState.salt.toString()}</span>
                 </div>
