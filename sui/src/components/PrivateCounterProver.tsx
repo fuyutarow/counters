@@ -42,8 +42,8 @@ export function PrivateCounterProver() {
       const poseidon = await buildPoseidon();
       const F = poseidon.F;
 
-      const saltHash = F.toBigInt(poseidon([saltBigInt]));
-      const oldHash = F.toBigInt(poseidon([oldValueBigInt, oldRandomnessBigInt]));
+      const saltHash = BigInt(F.toString(poseidon([saltBigInt])));
+      const oldHash = BigInt(F.toString(poseidon([oldValueBigInt, oldRandomnessBigInt])));
 
       // Generate proof
       const proofResult = await generateProof({

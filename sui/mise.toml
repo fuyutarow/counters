@@ -62,9 +62,21 @@ echo "🎉 デプロイ完了！"
 '''
 
 [tasks.test]
-description = "全テストの実行"
+description = "全テストの実行（manual 除く）"
 alias = "t"
-run = "bun test __tests__"
+run = "bun test __tests__/*.test.ts"
+
+[tasks."test:manual"]
+description = "Node.js で manual テストを実行（Bun 非互換テスト）"
+alias = "tm"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🧪 Manual テスト実行中（Node.js使用）..."
+node __tests__/manual/debug-snarkjs.mjs
+echo ""
+echo "✅ Manual テスト完了"
+'''
 
 [tasks.clean]
 description = "全ビルド成果物のクリーンアップ"
