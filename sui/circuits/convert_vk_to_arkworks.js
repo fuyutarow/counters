@@ -1,5 +1,6 @@
 // Convert snarkjs verification key to Arkworks canonical compressed format
 import { readFileSync, writeFileSync } from 'fs';
+import consola from 'consola';
 
 const vk = JSON.parse(readFileSync('keys/private_counter_vk.json', 'utf8'));
 
@@ -81,15 +82,15 @@ for (const ic of vk.IC) {
   bytes.push(...g1ToBytes(ic));
 }
 
-console.log(`Generated Arkworks VK bytes: ${bytes.length} bytes`);
-console.log(`Expected structure:`);
-console.log(`  - alpha_g1: 64 bytes`);
-console.log(`  - beta_g2: 128 bytes`);
-console.log(`  - gamma_g2: 128 bytes`);
-console.log(`  - delta_g2: 128 bytes`);
-console.log(`  - IC length: 8 bytes (${numIC} points)`);
-console.log(`  - IC points: ${numIC * 64} bytes (${numIC} × 64)`);
-console.log(`  - Total: ${64 + 128 + 128 + 128 + 8 + numIC * 64} bytes`);
+consola.log(`Generated Arkworks VK bytes: ${bytes.length} bytes`);
+consola.log(`Expected structure:`);
+consola.log(`  - alpha_g1: 64 bytes`);
+consola.log(`  - beta_g2: 128 bytes`);
+consola.log(`  - gamma_g2: 128 bytes`);
+consola.log(`  - delta_g2: 128 bytes`);
+consola.log(`  - IC length: 8 bytes (${numIC} points)`);
+consola.log(`  - IC points: ${numIC * 64} bytes (${numIC} × 64)`);
+consola.log(`  - Total: ${64 + 128 + 128 + 128 + 8 + numIC * 64} bytes`);
 
 // Save binary format
 const buffer = Buffer.from(bytes);
@@ -110,5 +111,5 @@ writeFileSync('keys/private_counter_vk_arkworks.json', JSON.stringify({
   }
 }, null, 2));
 
-console.log('\n✅ Saved to keys/private_counter_vk_arkworks.bin');
-console.log('✅ Saved to keys/private_counter_vk_arkworks.json');
+consola.log('\n✅ Saved to keys/private_counter_vk_arkworks.bin');
+consola.log('✅ Saved to keys/private_counter_vk_arkworks.json');
