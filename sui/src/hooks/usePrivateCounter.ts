@@ -7,16 +7,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildPoseidon } from "circomlibjs";
 import { increment, _new as newPrivateCounter } from "@/generated/counter/private_counter";
 import { type PrivateCounterState } from "@/lib/zkProof";
-import { getVerifyingKeyBytes } from "@/utils/verifyingKey";
+import { useNetworkVariable } from "@/networkConfig";
 import { useZkProver } from "./useZkProver";
 
-const PACKAGE_ID = "0x4698f2a2b8277f3e6779b1d0db415e66c9d68545d7b82dccab54a8de10ec74d3";
 const STORAGE_KEY = "privateCounters";
 
 interface StoredCounterData {
   salt: string;
   value: string;
-  randomness: string;
   valueHash: string;
   saltHash: string;
 }
@@ -42,6 +40,8 @@ export function usePrivateCounter() {
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
   const queryClient = useQueryClient();
+  const counterPackageId = useNetworkVariable("counterPackageId");
+  const vkRegistryId = useNetworkVariable("vkRegistryId");
   const { mutateAsync: executeTransaction } = useSignAndExecuteTransaction({
     execute: async ({ bytes, signature }) => {
       const executionResult = await suiClient.executeTransactionBlock({
@@ -109,31 +109,30 @@ export function usePrivateCounter() {
 
       // Generate initial secrets
       const salt = generateRandomFieldElement();
-      const initialRandomness = generateRandomFieldElement();
       const initialValue = BigInt(0);
 
-      // Compute initial value digest using Poseidon
+      // Compute hashes using Poseidon
       const poseidon = await buildPoseidon();
-      const initialValueDigest = poseidon([initialValue, initialRandomness]);
+
+      // value_digest = Poseidon(value, salt)
+      const initialValueDigest = poseidon([initialValue, salt]);
       const initialValueDigestBigInt = BigInt(poseidon.F.toString(initialValueDigest));
 
-      // Compute salt digest using Poseidon
+      // salt_digest = Poseidon(salt)
       const saltDigest = poseidon([salt]);
       const saltDigestBigInt = BigInt(poseidon.F.toString(saltDigest));
 
-      // Load verifying key bytes
-      const vkBytes = await getVerifyingKeyBytes();
-
       // Create transaction
       const tx = new Transaction();
-      newPrivateCounter({
-        package: PACKAGE_ID,
+      const counter = newPrivateCounter({
+        package: counterPackageId,
         arguments: {
           initialValueDigest: initialValueDigestBigInt,
-          saltValue: salt,
-          verifyingKeyBytes: Array.from(vkBytes),
+          saltDigest: saltDigestBigInt,
         },
       })(tx);
+
+      tx.transferObjects([counter], account.address);
 
       // Execute transaction
       const result = await executeTransaction({
@@ -153,7 +152,6 @@ export function usePrivateCounter() {
       storeCounterData(counterId, {
         salt: salt.toString(),
         value: initialValue.toString(),
-        randomness: initialRandomness.toString(),
         valueHash: initialValueDigestBigInt.toString(),
         saltHash: saltDigestBigInt.toString(),
       });
@@ -176,35 +174,28 @@ export function usePrivateCounter() {
 
       const salt = BigInt(stored.salt);
       const oldValue = BigInt(stored.value);
-      const oldRandomness = BigInt(stored.randomness);
       const oldHash = BigInt(stored.valueHash);
       const saltHash = BigInt(stored.saltHash);
 
-      // Generate new randomness for next state
-      const newRandomness = generateRandomFieldElement();
-
-      // Generate proof
+      // Generate proof (value_digest = Poseidon(value, salt))
       const proofResult = await generateProof({
         salt,
         oldValue,
-        oldRandomness,
-        newRandomness,
+        oldRandomness: salt, // No separate randomness, use salt
+        newRandomness: salt, // Use same salt for new value
         oldHash,
         saltHash,
       });
 
-      // Load verifying key bytes
-      const vkBytes = await getVerifyingKeyBytes();
-
       // Create transaction
       const tx = new Transaction();
       increment({
-        package: PACKAGE_ID,
+        package: counterPackageId,
         arguments: {
+          registry: vkRegistryId,
           self: counterId,
           proofBytes: Array.from(proofResult.proofBytes),
           publicInputsBytes: Array.from(proofResult.publicInputsBytes),
-          verifyingKeyBytes: Array.from(vkBytes),
         },
       })(tx);
 
@@ -217,7 +208,6 @@ export function usePrivateCounter() {
       storeCounterData(counterId, {
         ...stored,
         value: proofResult.newValue.toString(),
-        randomness: newRandomness.toString(),
         valueHash: proofResult.newHash.toString(),
       });
 
@@ -268,7 +258,6 @@ export function usePrivateCounter() {
 
     return {
       value: BigInt(stored.value),
-      randomness: BigInt(stored.randomness),
       valueHash: BigInt(stored.valueHash),
       salt: BigInt(stored.salt),
       saltHash: BigInt(stored.saltHash),

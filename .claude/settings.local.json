@@ -135,7 +135,8 @@
       "Bash(/bin/grep -A 5 -B 5 \"@mysten/codegen\")",
       "Bash(git log:*)",
       "Bash(/bin/grep -A 2 -B 2 \"codegen\")",
-      "WebFetch(domain:stackoverflow.com)"
+      "WebFetch(domain:stackoverflow.com)",
+      "Bash(m mt:*)"
     ],
     "deny": [],
     "ask": []

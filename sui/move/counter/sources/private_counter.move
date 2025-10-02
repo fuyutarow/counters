@@ -12,7 +12,7 @@
 /// - ZK circuit enforces: salt proof, valid old commitment, +1 increment, range constraint
 module counter::private_counter;
 
-use sui::{bcs, groth16, hash, poseidon};
+use sui::{bcs, groth16};
 
 // === Constants ===
 
@@ -37,12 +37,16 @@ const EPreviousHashMismatch: vector<u8> = b"Previous value hash does not match c
 const EInvalidIncrementProof: vector<u8> = b"ZK proof verification failed for increment operation";
 
 #[error]
-const EInvalidVerifyingKey: vector<u8> = b"Verifying key format is invalid";
-
-#[error]
 const EInvalidPublicInputSize: vector<u8> = b"Public input size is invalid";
 
 // === Structs ===
+
+/// Registry for the verifying key used by all private counters.
+/// This is a shared object created at package initialization.
+public struct VerifyingKeyRegistry has key {
+    id: UID,
+    vk_bytes: vector<u8>, // Raw verifying key bytes for proof verification
+}
 
 /// A private counter that stores hashes instead of actual values.
 /// The actual count value is never revealed on-chain.
@@ -50,39 +54,42 @@ const EInvalidPublicInputSize: vector<u8> = b"Public input size is invalid";
 public struct PrivateCounter has key, store {
     id: UID,
     // ZK proof state
-    salt_digest: u256, // Poseidon(salt) - Poseidon hash of the salt
-    value_digest: u256, // Poseidon(v, r) - Poseidon hash of value with randomness
-    // Verifying key (circuit pinning)
-    vk_digest: u256, // Blake2b256(vk) - Blake2b256 hash of the verifying key (tamper prevention)
+    salt_digest: u256, // Poseidon(salt) - fixed for this counter
+    value_digest: u256, // Poseidon(value, salt) - changes as value increments
+}
+
+// === Package Initialization ===
+
+/// Package initialization - creates the verifying key registry
+fun init(ctx: &mut TxContext) {
+    // Create empty registry - VK will be set via update_verifying_key
+    let registry = VerifyingKeyRegistry {
+        id: object::new(ctx),
+        vk_bytes: vector::empty(),
+    };
+
+    transfer::share_object(registry);
 }
 
 // === Public Functions ===
 
+/// Updates the verifying key in the registry (admin only, called once after deployment)
+public entry fun update_verifying_key(registry: &mut VerifyingKeyRegistry, vk_bytes: vector<u8>) {
+    registry.vk_bytes = vk_bytes;
+}
+
 /// Creates a new private counter with initial value hash.
 /// Returns an owned object that can be transferred to the desired owner.
 ///
-/// @param initial_value_digest: Poseidon(v_0, r_0) - hash of initial value with randomness
-/// @param salt_value: Salt value for Poseidon hashing
-/// @param verifying_key_bytes: Groth16 verifying key (serialized bytes)
+/// @param initial_value_digest: Poseidon(v_0, salt) - hash of initial value with salt
+/// @param salt_digest: Poseidon(salt) - hash of the salt value
 /// @param ctx: Transaction context
 /// @return: New PrivateCounter object (owned)
-public fun new(
-    initial_value_digest: u256,
-    salt_value: u256,
-    verifying_key_bytes: vector<u8>,
-    ctx: &mut TxContext,
-): PrivateCounter {
-    // Compute salt hash using Poseidon
-    let salt_digest = poseidon::poseidon_bn254(&vector[salt_value]);
-
-    // Compute verifying key hash using Blake2b256 for tamper detection
-    let vk_digest = compute_vk_digest(&verifying_key_bytes);
-
+public fun new(initial_value_digest: u256, salt_digest: u256, ctx: &mut TxContext): PrivateCounter {
     PrivateCounter {
         id: object::new(ctx),
         salt_digest,
         value_digest: initial_value_digest,
-        vk_digest,
     }
 }
 
@@ -91,42 +98,38 @@ public fun new(
 ///
 /// The proof must demonstrate:
 /// 1. Knowledge of salt: Poseidon(salt) = salt_digest
-/// 2. Valid old hash: h_old = Poseidon(v, r)
-/// 3. +1 increment: h_new = Poseidon(v+1, r')
+/// 2. Valid old hash: h_old = Poseidon(v, salt)
+/// 3. +1 increment: h_new = Poseidon(v+1, salt)
 /// 4. Range constraint: v is within valid range
 ///
+/// @param registry: Shared verifying key registry
 /// @param self: Mutable reference to the counter (owner only)
 /// @param proof_bytes: Groth16 proof points (serialized)
 /// @param public_inputs_bytes: Public inputs (salt_digest || h_old || h_new)
-/// @param verifying_key_bytes: Verifying key bytes (same format as used in new())
 public fun increment(
+    registry: &VerifyingKeyRegistry,
     self: &mut PrivateCounter,
     proof_bytes: vector<u8>,
     public_inputs_bytes: vector<u8>,
-    verifying_key_bytes: vector<u8>,
 ) {
-    // 1. Verify verifying key hasn't been tampered
-    let vk_digest = compute_vk_digest(&verifying_key_bytes);
-    assert!(self.vk_digest == vk_digest, EInvalidVerifyingKey);
-
-    // 2. Parse public inputs
+    // 1. Parse public inputs
     let (claimed_salt_digest, previous_digest, updated_digest) = parse_public_inputs(
         &public_inputs_bytes,
     );
 
-    // 3. Validate state consistency with on-chain state
+    // 2. Validate state consistency with on-chain state
     assert!(self.salt_digest == claimed_salt_digest, ESaltHashMismatch);
     assert!(self.value_digest == previous_digest, EPreviousHashMismatch);
 
-    // 4. Verify ZK proof
+    // 3. Verify ZK proof using VK from registry
     let is_valid_proof = verify_increment_proof(
-        &verifying_key_bytes,
+        &registry.vk_bytes,
         &proof_bytes,
         &public_inputs_bytes,
     );
     assert!(is_valid_proof, EInvalidIncrementProof);
 
-    // 5. Update value hash
+    // 4. Update value hash
     self.value_digest = updated_digest;
 }
 
@@ -140,11 +143,6 @@ public fun value_digest(self: &PrivateCounter): u256 {
 /// Returns the salt hash (Poseidon hash)
 public fun salt_digest(self: &PrivateCounter): u256 {
     self.salt_digest
-}
-
-/// Returns the verifying key hash (Blake2b256 hash)
-public fun verifying_key_digest(self: &PrivateCounter): u256 {
-    self.vk_digest
 }
 
 // === Private Helper Functions ===
@@ -188,13 +186,6 @@ fun verify_increment_proof(
     )
 }
 
-/// Computes Blake2b256 hash of verifying key bytes and returns as u256
-fun compute_vk_digest(verifying_key_bytes: &vector<u8>): u256 {
-    let vk_digest_bytes = hash::blake2b256(verifying_key_bytes);
-    let mut bcs_reader = bcs::new(vk_digest_bytes);
-    bcs_reader.peel_u256()
-}
-
 // === Test Functions ===
 
 #[test_only]
@@ -204,19 +195,11 @@ use sui::test_scenario;
 /// Creates a test counter with dummy hashes
 public fun create_test_counter(ctx: &mut TxContext): PrivateCounter {
     let dummy_value_digest: u256 = 123456;
-    let dummy_salt: u256 = 42;
-    let mut dummy_vk = vector::empty<u8>();
-    let mut i = 0;
-    // Create dummy verifying key bytes (96 bytes for testing)
-    while (i < 96) {
-        dummy_vk.push_back((i % 256) as u8);
-        i = i + 1;
-    };
+    let dummy_salt_digest: u256 = 78910;
 
     new(
         dummy_value_digest,
-        dummy_salt,
-        dummy_vk,
+        dummy_salt_digest,
         ctx,
     )
 }
@@ -231,21 +214,26 @@ fun test_counter_creation() {
     // Verify initial state
     assert!(counter.value_digest() > 0, 0);
     assert!(counter.salt_digest() > 0, 1);
-    assert!(counter.verifying_key_digest() > 0, 2);
 
     transfer::transfer(counter, owner);
     scenario.end();
 }
 
 #[test]
-#[expected_failure(abort_code = EInvalidVerifyingKey)]
-fun test_invalid_verifying_key() {
+#[expected_failure(abort_code = ESaltHashMismatch)]
+fun test_invalid_salt_hash() {
     let owner = @0xA;
     let mut scenario = test_scenario::begin(owner);
 
     let mut counter = create_test_counter(scenario.ctx());
 
-    // Try to increment with wrong verifying key
+    // Create dummy registry
+    let registry = VerifyingKeyRegistry {
+        id: object::new(scenario.ctx()),
+        vk_bytes: vector::empty(),
+    };
+
+    // Try to increment with invalid proof
     let mut dummy_proof = vector::empty<u8>();
     let mut i = 0;
     while (i < 192) {
@@ -260,15 +248,9 @@ fun test_invalid_verifying_key() {
         i = i + 1;
     };
 
-    let mut wrong_vk = vector::empty<u8>();
-    i = 0;
-    while (i < 96) {
-        wrong_vk.push_back(255u8); // Different from the original VK
-        i = i + 1;
-    };
+    increment(&registry, &mut counter, dummy_proof, dummy_inputs);
 
-    counter.increment(dummy_proof, dummy_inputs, wrong_vk);
-
+    transfer::share_object(registry);
     transfer::transfer(counter, owner);
     scenario.end();
 }
@@ -279,10 +261,11 @@ fun test_successful_increment_with_valid_proof() {
     let mut scenario = test_scenario::begin(owner);
 
     // Initial values from Circom circuit test
-    // old_value = 0, old_randomness = 123456789
+    // old_value = 0, salt = 42
     let initial_value_digest: u256 =
         1434943783498835797369287247471819544927612511567472487143872361879370653035;
-    let salt: u256 = 42;
+    let salt_digest: u256 =
+        12326503012965816391338144612242952408728683609716147019497703475006801258307; // Poseidon(salt)
 
     // VK bytes in Arkworks canonical compressed format (360 bytes)
     let mut vk_bytes = vector::empty<u8>();
@@ -654,7 +637,13 @@ fun test_successful_increment_with_valid_proof() {
         i = i + 1;
     };
 
-    let mut counter = new(initial_value_digest, salt, vk_bytes, scenario.ctx());
+    // Create registry and set VK
+    let registry = VerifyingKeyRegistry {
+        id: object::new(scenario.ctx()),
+        vk_bytes,
+    };
+
+    let mut counter = new(initial_value_digest, salt_digest, scenario.ctx());
 
     // Real Groth16 proof in Arkworks compressed format (128 bytes)
     let mut proof = vector::empty<u8>();
@@ -900,16 +889,10 @@ fun test_successful_increment_with_valid_proof() {
         i = i + 1;
     };
 
-    // Same VK bytes as used in counter creation (360 bytes)
-    let mut vk = vector::empty<u8>();
-    i = 0;
-    while (i < 360) {
-        vk.push_back(vk_data[i]);
-        i = i + 1;
-    };
-
     // Verify the proof and increment the counter
-    counter.increment(proof, public_inputs, vk);
+    increment(&registry, &mut counter, proof, public_inputs);
+
+    transfer::share_object(registry);
 
     // Verify the value hash was updated to new_digest
     // new_value = 1, new_randomness = 987654321
