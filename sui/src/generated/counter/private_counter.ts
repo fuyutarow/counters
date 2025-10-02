@@ -30,13 +30,13 @@ export const PrivateCounter = new MoveStruct({
   name: `${$moduleName}::PrivateCounter`,
   fields: {
     id: object.UID,
-    salt_hash: bcs.u256(),
-    value_hash: bcs.u256(),
-    vk_hash: bcs.u256(),
+    salt_digest: bcs.u256(),
+    value_digest: bcs.u256(),
+    vk_digest: bcs.u256(),
   },
 });
 export interface NewArguments {
-  initialValueHash: RawTransactionArgument<number | bigint>;
+  initialValueDigest: RawTransactionArgument<number | bigint>;
   saltValue: RawTransactionArgument<number | bigint>;
   verifyingKeyBytes: RawTransactionArgument<number[]>;
 }
@@ -45,7 +45,7 @@ export interface NewOptions {
   arguments:
     | NewArguments
     | [
-        initialValueHash: RawTransactionArgument<number | bigint>,
+        initialValueDigest: RawTransactionArgument<number | bigint>,
         saltValue: RawTransactionArgument<number | bigint>,
         verifyingKeyBytes: RawTransactionArgument<number[]>,
       ];
@@ -54,7 +54,7 @@ export interface NewOptions {
  * Creates a new private counter with initial value hash. Returns an owned object
  * that can be transferred to the desired owner.
  *
- * @param initial_value_hash: Poseidon(v_0, r_0) - hash of initial value with
+ * @param initial_value_digest: Poseidon(v_0, r_0) - hash of initial value with
  * randomness @param salt_value: Salt value for Poseidon hashing @param
  * verifying_key_bytes: Groth16 verifying key (serialized bytes) @param ctx:
  * Transaction context @return: New PrivateCounter object (owned)
@@ -62,7 +62,7 @@ export interface NewOptions {
 export function _new(options: NewOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = ["u256", "u256", "vector<u8>"] satisfies string[];
-  const parameterNames = ["initialValueHash", "saltValue", "verifyingKeyBytes"];
+  const parameterNames = ["initialValueDigest", "saltValue", "verifyingKeyBytes"];
   return (tx: Transaction) =>
     tx.moveCall({
       package: packageAddress,
@@ -94,14 +94,14 @@ export interface IncrementOptions {
  *
  * The proof must demonstrate:
  *
- * 1.  Knowledge of salt: Poseidon(salt) = salt_hash
+ * 1.  Knowledge of salt: Poseidon(salt) = salt_digest
  * 2.  Valid old hash: h_old = Poseidon(v, r)
  * 3.  +1 increment: h_new = Poseidon(v+1, r')
  * 4.  Range constraint: v is within valid range
  *
  * @param self: Mutable reference to the counter (owner only) @param proof_bytes:
  * Groth16 proof points (serialized) @param public_inputs_bytes: Public inputs
- * (salt_hash || h_old || h_new) @param verifying_key_bytes: Verifying key bytes
+ * (salt_digest || h_old || h_new) @param verifying_key_bytes: Verifying key bytes
  * (same format as used in new())
  */
 export function increment(options: IncrementOptions) {
@@ -121,15 +121,15 @@ export function increment(options: IncrementOptions) {
       arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-export interface ValueHashArguments {
+export interface ValueDigestArguments {
   self: RawTransactionArgument<string>;
 }
-export interface ValueHashOptions {
+export interface ValueDigestOptions {
   package?: string;
-  arguments: ValueHashArguments | [self: RawTransactionArgument<string>];
+  arguments: ValueDigestArguments | [self: RawTransactionArgument<string>];
 }
 /** Returns the current value hash (does not reveal actual value) */
-export function valueHash(options: ValueHashOptions) {
+export function valueDigest(options: ValueDigestOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = [`${packageAddress}::private_counter::PrivateCounter`] satisfies string[];
   const parameterNames = ["self"];
@@ -137,19 +137,19 @@ export function valueHash(options: ValueHashOptions) {
     tx.moveCall({
       package: packageAddress,
       module: "private_counter",
-      function: "value_hash",
+      function: "value_digest",
       arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-export interface SaltHashArguments {
+export interface SaltDigestArguments {
   self: RawTransactionArgument<string>;
 }
-export interface SaltHashOptions {
+export interface SaltDigestOptions {
   package?: string;
-  arguments: SaltHashArguments | [self: RawTransactionArgument<string>];
+  arguments: SaltDigestArguments | [self: RawTransactionArgument<string>];
 }
 /** Returns the salt hash (Poseidon hash) */
-export function saltHash(options: SaltHashOptions) {
+export function saltDigest(options: SaltDigestOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = [`${packageAddress}::private_counter::PrivateCounter`] satisfies string[];
   const parameterNames = ["self"];
@@ -157,19 +157,19 @@ export function saltHash(options: SaltHashOptions) {
     tx.moveCall({
       package: packageAddress,
       module: "private_counter",
-      function: "salt_hash",
+      function: "salt_digest",
       arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
-export interface VerifyingKeyHashArguments {
+export interface VerifyingKeyDigestArguments {
   self: RawTransactionArgument<string>;
 }
-export interface VerifyingKeyHashOptions {
+export interface VerifyingKeyDigestOptions {
   package?: string;
-  arguments: VerifyingKeyHashArguments | [self: RawTransactionArgument<string>];
+  arguments: VerifyingKeyDigestArguments | [self: RawTransactionArgument<string>];
 }
 /** Returns the verifying key hash (Blake2b256 hash) */
-export function verifyingKeyHash(options: VerifyingKeyHashOptions) {
+export function verifyingKeyDigest(options: VerifyingKeyDigestOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = [`${packageAddress}::private_counter::PrivateCounter`] satisfies string[];
   const parameterNames = ["self"];
@@ -177,7 +177,7 @@ export function verifyingKeyHash(options: VerifyingKeyHashOptions) {
     tx.moveCall({
       package: packageAddress,
       module: "private_counter",
-      function: "verifying_key_hash",
+      function: "verifying_key_digest",
       arguments: normalizeMoveArguments(options.arguments, argumentsTypes, parameterNames),
     });
 }
