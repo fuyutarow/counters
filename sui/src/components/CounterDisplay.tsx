@@ -42,14 +42,34 @@ export function CounterDisplay({
   };
 
   if (error && !isLoading) {
+    const isWalrusError = error.message.includes("Failed to read blob from Walrus");
+    const is404Error = error.message.includes("404");
+
     return (
       <div className="flex justify-center pt-6">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center text-red-500">
-              <p className="font-semibold">Failed to load counter</p>
+              <p className="font-semibold">
+                {isWalrusError ? "Walrus Blob Error" : "Failed to load counter"}
+              </p>
               <p className="mt-2 text-sm">{error.message}</p>
+              {is404Error && (
+                <p className="mt-3 text-amber-600 text-sm">
+                  The blob may have expired or been deleted from the Walrus network.
+                </p>
+              )}
               <p className="mt-4 text-muted-foreground text-xs">Counter ID: {formatAddress(id)}</p>
+              <div className="mt-4">
+                <a
+                  href={`https://testnet.suivision.xyz/object/${id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1 text-blue-500 text-sm hover:text-blue-700"
+                >
+                  View on SuiVision Explorer <ExternalLink className="h-4 w-4" />
+                </a>
+              </div>
             </div>
           </CardContent>
         </Card>

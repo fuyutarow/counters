@@ -90,6 +90,13 @@ export default [
     },
     rules: {
       "prefer-const": "error",
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.object.name='console']",
+          message: "console の代わりに consola を使用してください。",
+        },
+      ],
     },
   },
   {

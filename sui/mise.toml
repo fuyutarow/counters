@@ -278,7 +278,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint . --ext .ts,.tsx,.js --fix || true
+bun eslint . --ext .ts,.tsx,.js --fix
 echo "✅ ESLint修正完了"
 '''
 
@@ -375,9 +375,8 @@ sui client publish --gas-budget {{vars.gas_budget}}
 
 echo ""
 echo "🔄 次の手順:"
-echo "  1. suigen-config.jsonにPackage IDを手動で更新"
-echo "  2. mise run gen    # ABI定義の更新"
-echo "  3. mise run dev    # 開発サーバー再起動"
+echo "  1. mise run gen    # ABI定義の更新"
+echo "  2. mise run dev    # 開発サーバー再起動"
 '''
 
 [tasks."move:test"]
