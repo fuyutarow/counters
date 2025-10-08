@@ -33,11 +33,11 @@ export function WalrusCounterCreate({ onSuccess }: { onSuccess?: () => void }) {
         toast.info("Creating Walrus blob...");
         const blobId = await createCounterBlob(0);
 
-        // Step 2: Wrap blob in WalrusCounter
+        // Step 2: Create WalrusCounter with blob
         toast.info("Creating WalrusCounter on-chain...");
         const tx = new Transaction();
-        const blobObj = tx.object(blobId);
-        walrusCounter.wrap({ arguments: [blobObj] })(tx);
+        const counter = walrusCounter._new({ arguments: [tx.object(blobId)] })(tx);
+        tx.transferObjects([counter], currentAccount.address);
 
         const txResult = await signAndExecuteTransaction({
           transaction: tx,

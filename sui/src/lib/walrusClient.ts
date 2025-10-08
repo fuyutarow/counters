@@ -3,6 +3,7 @@
  * Uses the Walrus HTTP API directly to avoid WASM build issues
  */
 
+import { bcs } from "@mysten/sui/bcs";
 import { z } from "zod";
 
 // Using Mysten's public aggregator and publisher
@@ -10,24 +11,38 @@ import { z } from "zod";
 const AGGREGATOR_URL = "https://aggregator.walrus-testnet.walrus.space";
 const PUBLISHER_URL = "https://publisher.walrus-testnet.walrus.space";
 
+/**
+ * Walrus HTTP APIのレスポンス型定義
+ *
+ * zodが必要な理由：
+ * - @mysten/walrus SDKはWASMに依存しNext.jsビルドに失敗
+ * - HTTP APIには公式TypeScript型定義が提供されていない
+ * - 実行時の型安全性のため、zodでバリデーションを行う
+ */
 const walrusStoreResponseSchema = z.union([
   z.object({
     newlyCreated: z.object({
       blobObject: z.object({
         id: z.string(),
-        storedEpoch: z.number(),
+        registeredEpoch: z.number(),
         blobId: z.string(),
         size: z.number(),
-        erasureCodeType: z.string(),
-        certifiedEpoch: z.number(),
+        encodingType: z.string(),
+        certifiedEpoch: z.number().nullable(),
         storage: z.object({
           id: z.string(),
           startEpoch: z.number(),
           endEpoch: z.number(),
           storageSize: z.number(),
         }),
+        deletable: z.boolean(),
       }),
-      encodedSize: z.number(),
+      resourceOperation: z.object({
+        registerFromScratch: z.object({
+          encodedLength: z.number(),
+          epochsAhead: z.number(),
+        }),
+      }),
       cost: z.number(),
     }),
   }),
@@ -45,17 +60,36 @@ const walrusStoreResponseSchema = z.union([
 
 /**
  * Counter value stored in Walrus blob
+ *
+ * Note: Move側に対応する構造体定義は不要
+ * - Blobの中身は任意のバイト列として扱われる
+ * - クライアント側で独自にBCSスキーマを定義して管理
  */
-const walrusCounterValueSchema = z.object({
-  value: z.number(),
+const CounterValueBcs = bcs.struct("CounterValue", {
+  value: bcs.u64(),
 });
 
-export type WalrusCounterValue = z.infer<typeof walrusCounterValueSchema>;
+/**
+ * TypeScript型を自動推論
+ *
+ * ベストプラクティス:
+ * - 手動でinterfaceを定義せず、BCSスキーマから型を導出
+ * - Input型とOutput型を明示的に分離
+ */
+export type WalrusCounterValueInput = typeof CounterValueBcs.$inferInput;
+// → { value: number | string | bigint }
+
+export type WalrusCounterValue = typeof CounterValueBcs.$inferType;
+// → { value: string }
 
 /**
- * Store data on Walrus
+ * Store data on Walrus and return Sui Blob object ID
+ *
+ * @param data - Data to store (string or Uint8Array)
+ * @param ownerAddress - Optional Sui address to send the Blob object to
+ * @returns Sui object ID of the created Blob object
  */
-export async function storeBlob(data: Uint8Array | string): Promise<string> {
+export async function storeBlob(data: Uint8Array | string, ownerAddress?: string): Promise<string> {
   // TypeScript型定義の問題:
   // - Uint8Array.bufferの型は ArrayBufferLike (= ArrayBuffer | SharedArrayBuffer)
   // - BodyInitが期待するのは ArrayBufferView<ArrayBuffer> | ArrayBuffer
@@ -63,7 +97,12 @@ export async function storeBlob(data: Uint8Array | string): Promise<string> {
   // - 実行時は動作するため、型アサーションで対応
   const body = (typeof data === "string" ? data : data.buffer) as BodyInit;
 
-  const response = await fetch(`${PUBLISHER_URL}/v1/store`, {
+  const url = new URL(`${PUBLISHER_URL}/v1/blobs`);
+  if (ownerAddress) {
+    url.searchParams.set("send_object_to", ownerAddress);
+  }
+
+  const response = await fetch(url.toString(), {
     method: "PUT",
     body,
     headers: {
@@ -84,12 +123,13 @@ export async function storeBlob(data: Uint8Array | string): Promise<string> {
 
   const result = parseResult.data;
 
-  const blobId =
-    "newlyCreated" in result
-      ? result.newlyCreated.blobObject.blobId
-      : result.alreadyCertified.blobId;
+  // Return Sui Blob object ID (not Walrus blob ID)
+  if ("newlyCreated" in result) {
+    return result.newlyCreated.blobObject.id;
+  }
 
-  return blobId;
+  // For already certified blobs, we need to query the object ID from the event
+  throw new Error("Blob already certified - need to implement event querying to get object ID");
 }
 
 /**
@@ -106,33 +146,28 @@ export async function readBlob(blobId: string): Promise<Uint8Array> {
 }
 
 /**
- * Read text data from Walrus
+ * Read counter value from Walrus blob (BCS encoded)
+ *
+ * @returns bigint (BCS u64の出力型)
  */
-export async function readBlobAsText(blobId: string): Promise<string> {
-  const data = await readBlob(blobId);
-  return new TextDecoder().decode(data);
+export async function readCounterValue(blobId: string): Promise<bigint> {
+  const bcsBytes = await readBlob(blobId);
+  const data = CounterValueBcs.parse(bcsBytes);
+  // data.value は string型 (BCS u64の出力)
+  return BigInt(data.value);
 }
 
 /**
- * Read counter value from Walrus blob
+ * Create counter value blob in Walrus (BCS encoded)
+ *
+ * @param value - number | string | bigint (BCS u64の入力型)
+ * @param ownerAddress - Optional Sui address to send the Blob object to
+ * @returns Sui object ID of the created Blob object
  */
-export async function readCounterValue(blobId: string): Promise<number> {
-  const text = await readBlobAsText(blobId);
-  const json = JSON.parse(text);
-  const parseResult = walrusCounterValueSchema.safeParse(json);
-
-  if (!parseResult.success) {
-    throw new Error(`Invalid counter value: ${parseResult.error.message}`);
-  }
-
-  return parseResult.data.value;
-}
-
-/**
- * Create counter value blob in Walrus
- */
-export async function createCounterBlob(value: number): Promise<string> {
-  const counterData: WalrusCounterValue = { value };
-  const blob = JSON.stringify(counterData);
-  return await storeBlob(blob);
+export async function createCounterBlob(
+  value: WalrusCounterValueInput["value"],
+  ownerAddress?: string,
+): Promise<string> {
+  const bcsBytes = CounterValueBcs.serialize({ value }).toBytes();
+  return await storeBlob(bcsBytes, ownerAddress);
 }
