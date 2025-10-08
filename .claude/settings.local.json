@@ -167,7 +167,9 @@
       "Bash(BUN_TEST_TIMEOUT=120000 bun test __tests__/node/private-counter.test.ts --test-name-pattern \"should increment private counter with ZK\")",
       "Bash(ls:*)",
       "WebFetch(domain:docs.walrus.site)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(/bin/grep -i walrus)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
