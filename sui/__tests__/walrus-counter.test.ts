@@ -13,6 +13,7 @@ import * as walrusCounter from "@/generated/counter/walrus_counter";
 import {
   createCounterBlob,
   getBlobIdFromObject,
+  incrementWalrusCounter,
   readBlob,
   readCounterValue,
   storeBlob,
@@ -187,8 +188,19 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
 
       const counterId = createdCounterObj.reference.objectId;
 
-      // 3. Increment counter (create new blob with value 1)
-      const newBlobObjectId = await createCounterBlob(1, signerAddress);
+      // 3. Read initial value before increment
+      const initialBlobId = await getBlobIdFromObject(client, initialBlobObjectId);
+      const _initialRawBytes = await readBlob(initialBlobId);
+      const initialValue = await readCounterValue(initialBlobId);
+      assert.strictEqual(initialValue, 0n, "Initial value should be 0");
+
+      // 4. Increment counter using helper function
+      const newBlobObjectId = await incrementWalrusCounter(
+        client,
+        counterId,
+        initialBlobObjectId,
+        signerAddress,
+      );
       await new Promise((resolve) => setTimeout(resolve, 15000));
 
       const tx2 = new Transaction();
@@ -216,11 +228,24 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
         `Counter replace should succeed: ${replaceResult.effects?.status.error}`,
       );
 
-      // 4. Read final counter value directly from the new blob we created
-      const finalBlobId = await getBlobIdFromObject(client, newBlobObjectId);
-      const finalValue = await readCounterValue(finalBlobId);
+      // 4. Verify increment worked correctly by parsing the new blob
+      const newBlobId = await getBlobIdFromObject(client, newBlobObjectId);
 
-      assert.strictEqual(finalValue, 1n, "Counter value should be 1 after increment");
+      // 4a. Read raw bytes from new blob
+      const newRawBytes = await readBlob(newBlobId);
+
+      // 4b. Read raw bytes from initial blob
+      const initialRawBytes = await readBlob(initialBlobId);
+
+      // 4c. Parse both with BCS
+      const newBlobValue = await readCounterValue(newBlobId);
+
+      // 4e. Verify increment: 0 → 1
+      assert.strictEqual(initialValue, 0n, "Initial value: 0");
+      assert.strictEqual(newBlobValue, 1n, "New value: 1");
+      assert.strictEqual(newBlobValue - initialValue, 1n, "Increment: +1");
+      assert.strictEqual(initialRawBytes.length, 8, "BCS u64 should be 8 bytes");
+      assert.strictEqual(newRawBytes.length, 8, "BCS u64 should be 8 bytes");
     },
   );
 });

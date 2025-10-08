@@ -251,3 +251,36 @@ export async function createCounterBlob(
   const bcsBytes = CounterValueBcs.serialize({ value }).toBytes();
   return await storeBlob(bcsBytes, ownerAddress);
 }
+
+/**
+ * Prepare increment for Walrus counter by reading current value and creating new blob
+ *
+ * NOTE: This only creates the new blob. Caller must execute replace() transaction separately:
+ * 1. Call this function to get newBlobObjectId
+ * 2. Execute walrusCounter.replace(tx, counterId, newBlobObjectId)
+ * 3. Transfer old blob returned from replace()
+ *
+ * @param suiClient - Sui client instance
+ * @param _counterObjectId - WalrusCounter object ID (unused, for future use)
+ * @param currentBlobObjectId - Current blob object ID in the counter
+ * @param signerAddress - Address to send the new blob object to
+ * @returns New blob object ID (to be used with replace())
+ */
+export async function incrementWalrusCounter(
+  suiClient: { getObject: (params: unknown) => Promise<unknown> },
+  _counterObjectId: string,
+  currentBlobObjectId: string,
+  signerAddress: string,
+): Promise<string> {
+  // 1. Get current blob ID from blob object
+  const currentBlobId = await getBlobIdFromObject(suiClient, currentBlobObjectId);
+
+  // 2. Read current value
+  const currentValue = await readCounterValue(currentBlobId);
+
+  // 3. Create new blob with incremented value
+  const newValue = currentValue + 1n;
+  const newBlobObjectId = await createCounterBlob(newValue, signerAddress);
+
+  return newBlobObjectId;
+}
