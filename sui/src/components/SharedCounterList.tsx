@@ -71,7 +71,7 @@ export function SharedCounterList() {
             </CardHeader>
             <CardContent className="pt-0">
               <div className="flex items-center justify-between">
-                <div className="text-muted-foreground text-sm">Counter: {counter.id}</div>
+                <div className="text-muted-foreground text-sm">Version: {counter.version}</div>
                 <Button
                   variant="outline"
                   size="sm"

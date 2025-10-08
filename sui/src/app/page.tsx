@@ -1,7 +1,7 @@
 "use client";
 
 import { useCurrentAccount } from "@mysten/dapp-kit";
-import { ArrowRight, Lock, Package } from "lucide-react";
+import { ArrowRight, Database, Lock, Package } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +26,7 @@ export default function HomePage() {
                 <p className="text-muted-foreground text-xl">Choose your counter demo</p>
               </div>
 
-              <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 <Card className="transition-shadow hover:shadow-lg">
                   <CardHeader>
                     <div className="mb-2 flex items-center gap-3">
@@ -69,6 +69,29 @@ export default function HomePage() {
                     <Button asChild className="w-full" variant="outline">
                       <Link href="/shared-counter">
                         Try Shared Counter
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card className="transition-shadow hover:shadow-lg">
+                  <CardHeader>
+                    <div className="mb-2 flex items-center gap-3">
+                      <Database className="h-8 w-8 text-primary" />
+                      <CardTitle>Walrus Counter</CardTitle>
+                    </div>
+                    <CardDescription>Counter with blob storage on Walrus</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="mb-4 space-y-2 text-muted-foreground text-sm">
+                      <li>• Off-chain storage</li>
+                      <li>• Blob-based data</li>
+                      <li>• Decentralized counter</li>
+                    </ul>
+                    <Button asChild className="w-full" variant="outline">
+                      <Link href="/walrus-counter">
+                        Try Walrus Counter
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </Link>
                     </Button>

@@ -1,11 +1,7 @@
-import { useSuiClientContext } from "@mysten/dapp-kit";
-import { SuiGraphQLClient } from "@mysten/sui/graphql";
 import { useQuery } from "@tanstack/react-query";
 import consola from "consola";
 import { z } from "zod";
-import { getSharedCountersQuery } from "@/graphql/counter-queries";
 import { useNetworkVariable } from "@/networkConfig";
-import { getGraphQLUrl, type Network } from "@/types/network";
 
 // Zod schema for strict validation
 const SharedCounterSchema = z.object({
@@ -18,99 +14,50 @@ export type SharedCounterData = {
   version: string;
 };
 
-function parseSharedCounterData(
-  contents: { json?: unknown },
-  nodeAddress: string,
-  nodeVersion: string | number,
-): SharedCounterData | null {
-  if (!contents.json) {
-    consola.warn("No JSON content in SharedCounter node:", nodeAddress);
-    return null;
-  }
-
-  consola.info("Raw SharedCounter data:", contents.json);
-
-  const result = SharedCounterSchema.safeParse(contents.json);
-  if (!result.success) {
-    consola.warn("Invalid SharedCounter data:", result.error.format());
-    consola.warn("Raw data was:", contents.json);
-    return null;
-  }
-
-  return {
-    id: nodeAddress,
-    value: String(result.data.value),
-    version: String(nodeVersion),
-  };
-}
-
 export function useSharedCounterList() {
   const counterPackageId = useNetworkVariable("counterPackageId");
-  const { network } = useSuiClientContext();
-
-  const gqlClient = new SuiGraphQLClient({
-    url: getGraphQLUrl(network as Network),
-  });
 
   const counterType = `${counterPackageId}::shared_counter::SharedCounter`;
+  // Current network is hardcoded to testnet in providers.tsx
+  const network = "testnet";
 
   return useQuery({
-    queryKey: ["shared-counters", counterType],
+    queryKey: ["shared-counters", counterType, network],
     queryFn: async (): Promise<SharedCounterData[]> => {
-      consola.info("[useSharedCounterList] Querying:", {
+      consola.info("[useSharedCounterList] Querying with GraphQL API:", {
         type: counterType,
         packageId: counterPackageId,
+        network,
       });
 
-      const result = await gqlClient.query({
-        query: getSharedCountersQuery,
-        variables: {
-          type: counterType,
-        },
-      });
+      const response = await fetch(
+        `/api/shared-counters?type=${encodeURIComponent(counterType)}&network=${network}`,
+      );
 
-      if (result.errors && result.errors.length > 0) {
-        throw new Error(`GraphQL error: ${result.errors[0]?.message}`);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to fetch shared counters");
       }
 
+      const data = await response.json();
       const counters: SharedCounterData[] = [];
 
-      const data = result.data as { objects?: { nodes?: unknown[] } };
-      consola.info("[useSharedCounterList] Found nodes:", data?.objects?.nodes?.length ?? 0);
-
-      if (data?.objects?.nodes) {
-        for (const nodeItem of data.objects.nodes) {
-          const node = nodeItem as {
-            asMoveObject?: {
-              contents?: {
-                json?: unknown;
-                type?: { repr?: string };
-              };
-            };
-            address?: string;
-            version?: string | number;
-          };
-
-          if (
-            node?.asMoveObject?.contents &&
-            node.address &&
-            node.version &&
-            typeof node.asMoveObject.contents === "object" &&
-            node.asMoveObject.contents !== null
-          ) {
-            const contents = node.asMoveObject.contents;
-            if (!contents.json) continue;
-
-            const counterData = parseSharedCounterData(
-              contents,
-              node.address,
-              String(node.version ?? undefined),
-            );
-            if (counterData) {
-              counters.push(counterData);
-            }
-          }
+      for (const counter of data.counters || []) {
+        const parseResult = SharedCounterSchema.safeParse({ value: counter.value });
+        if (!parseResult.success) {
+          consola.warn("[useSharedCounterList] Invalid SharedCounter data:", {
+            id: counter.id,
+            error: parseResult.error.format(),
+            rawData: counter,
+          });
+          continue;
         }
+
+        counters.push({
+          id: counter.id,
+          value: String(parseResult.data.value),
+          version: counter.version,
+        });
       }
 
       consola.info("[useSharedCounterList] Parsed counters:", counters.length);

@@ -35,6 +35,12 @@ export function AppBar() {
             >
               Private Counter
             </Link>
+            <Link
+              href="/walrus-counter"
+              className="font-medium text-sm transition-colors hover:text-primary"
+            >
+              Walrus Counter
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-2">
