@@ -1,0 +1,16 @@
+/**************************************************************
+ * THIS FILE IS GENERATED AND SHOULD NOT BE MANUALLY MODIFIED *
+ **************************************************************/
+
+/** Sui object identifiers */
+
+import { bcs } from "@mysten/sui/bcs";
+import { MoveStruct } from "../../../utils/index";
+
+const $moduleName = "0x2::object";
+export const UID = new MoveStruct({
+  name: `${$moduleName}::UID`,
+  fields: {
+    id: bcs.Address,
+  },
+});
