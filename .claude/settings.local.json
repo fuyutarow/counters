@@ -184,7 +184,9 @@
       "Bash(do)",
       "Bash(done)",
       "Bash(for url in \"https://publisher.walrus-testnet.walrus.space/v1\" \"https://walrus-testnet-publisher.nodes.guru/v1\" \"https://walrus-testnet-publisher.chainbase.online/v1\" \"https://publisher.walrus-01.tududes.com/v1\")",
-      "Bash(do echo \"Testing: $url\")"
+      "Bash(do echo \"Testing: $url\")",
+      "mcp__serena__list_memories",
+      "Bash(/bin/grep -A 10 \"\\[dependencies\\]\")"
     ],
     "deny": [],
     "ask": []
