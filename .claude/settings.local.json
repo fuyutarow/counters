@@ -169,7 +169,13 @@
       "WebFetch(domain:docs.walrus.site)",
       "Bash(xargs:*)",
       "Bash(/bin/grep -i walrus)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(/bin/grep -A 5 \"type BodyInit\")",
+      "Bash(/bin/grep -A 3 \"type XMLHttpRequestBodyInit\")",
+      "Bash(/bin/grep -B 2 -A 5 \"interface ArrayBufferView\")",
+      "Bash(/bin/grep -A 10 \"interface ArrayBufferView\")",
+      "Bash(/bin/grep -A 20 \"interface SuiObjectResponse\")",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

@@ -8,10 +8,19 @@ import { ExternalLink } from "lucide-react";
 import { ResultAsync } from "neverthrow";
 import { useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
 import { createCounterBlob, readCounterValue } from "@/lib/walrusClient";
+
+const walrusCounterFieldsSchema = z.object({
+  blob: z.object({
+    fields: z.object({
+      blob_id: z.string(),
+    }),
+  }),
+});
 
 interface WalrusCounterProps {
   id: string;
@@ -37,14 +46,13 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
         return null;
       }
 
-      const fields = obj.data.content.fields as Record<string, unknown>;
-      const blob = fields.blob as Record<string, unknown> | undefined;
-      const blobFields = blob?.fields as Record<string, unknown> | undefined;
-      const blobId = blobFields?.blob_id as string | undefined;
+      const parseResult = walrusCounterFieldsSchema.safeParse(obj.data.content.fields);
 
-      if (!blobId) {
-        throw new Error("No blob_id found");
+      if (!parseResult.success) {
+        throw new Error(`Invalid WalrusCounter fields: ${parseResult.error.message}`);
       }
+
+      const blobId = parseResult.data.blob.fields.blob_id;
 
       // Read counter value from Walrus blob
       const counterValue = await readCounterValue(blobId);
