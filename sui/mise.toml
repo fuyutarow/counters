@@ -278,7 +278,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint . --ext .ts,.tsx,.js --fix || true
+bun eslint . --ext .ts,.tsx,.js --fix
 echo "✅ ESLint修正完了"
 '''
 

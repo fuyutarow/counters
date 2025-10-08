@@ -1,178 +1,33 @@
 "use client";
 
-import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@mysten/dapp-kit";
-import { Transaction } from "@mysten/sui/transactions";
 import { formatAddress } from "@mysten/sui/utils";
-import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { ResultAsync } from "neverthrow";
-import { useState } from "react";
-import { toast } from "sonner";
-import { z } from "zod";
 import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
-import * as walrusCounter from "@/generated/counter/walrus_counter";
-import { createCounterBlob, readCounterValue } from "@/lib/walrusClient";
-import { useNetworkVariable } from "@/networkConfig";
-
-/**
- * WalrusCounter Move構造体のフィールド型定義
- *
- * zodが必要な理由：
- * - @mysten/sui SDKの型定義は `fields: { [key: string]: MoveValue }` と緩い
- * - MoveValueは `number | boolean | string | ...` のユニオン型
- * - 具体的なMove構造体の型情報が失われているため、zodで型を具体化する
- */
-const walrusCounterFieldsSchema = z.object({
-  blob: z.object({
-    fields: z.object({
-      blob_id: z.string(),
-    }),
-  }),
-});
+import { useWalrusCounter } from "@/hooks/useWalrusCounter";
 
 interface WalrusCounterProps {
   id: string;
 }
 
 export function WalrusCounter({ id }: WalrusCounterProps) {
-  const currentAccount = useCurrentAccount();
-  const suiClient = useSuiClient();
-  const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction();
-  const counterPackageId = useNetworkVariable("counterPackageId");
-  const [isIncrementing, setIsIncrementing] = useState(false);
-  const [isSettingValue, setIsSettingValue] = useState(false);
+  const walrusCounter = useWalrusCounter();
 
-  // Fetch WalrusCounter object and blob data
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["walrus-counter", id],
-    queryFn: async () => {
-      const obj = await suiClient.getObject({
-        id,
-        options: { showContent: true },
-      });
+  // Fetch counter value using the hook
+  const { data, isLoading, error } = walrusCounter.useValue(id);
 
-      if (!obj.data?.content || obj.data.content.dataType !== "moveObject") {
-        return null;
-      }
-
-      const parseResult = walrusCounterFieldsSchema.safeParse(obj.data.content.fields);
-
-      if (!parseResult.success) {
-        const error = `Invalid WalrusCounter fields: ${parseResult.error.message}`;
-        throw new Error(error);
-      }
-
-      const blobId = parseResult.data.blob.fields.blob_id;
-
-      // Read counter value from Walrus blob
-      const readResult = await ResultAsync.fromPromise(
-        readCounterValue(blobId),
-        (error) =>
-          new Error(
-            `Failed to read blob from Walrus (blob_id: ${blobId}): ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          ),
-      );
-
-      if (readResult.isErr()) {
-        throw readResult.error;
-      }
-
-      return {
-        id,
-        blobId,
-        value: String(readResult.value),
-      };
-    },
-    enabled: !!id,
-  });
+  // Operations
+  const isIncrementing = walrusCounter.isPending.increment;
+  const isSettingValue = walrusCounter.isPending.setValue;
 
   const handleIncrement = async () => {
-    if (!currentAccount || !data) return;
-
-    setIsIncrementing(true);
-
-    const result = await ResultAsync.fromPromise(
-      (async () => {
-        // Read current value
-        const currentValue = Number.parseInt(data.value, 10);
-        const newBlobId = await createCounterBlob(currentValue + 1, currentAccount.address);
-
-        // Replace blob in counter
-        const tx = new Transaction();
-        walrusCounter.replace({
-          package: counterPackageId,
-          arguments: [tx.object(id), tx.object(newBlobId)],
-        })(tx);
-        const txResult = await signAndExecuteTransaction({ transaction: tx });
-
-        return txResult;
-      })(),
-      (err) => {
-        const errorMsg = err instanceof Error ? err.message : "Unknown error";
-        return errorMsg;
-      },
-    );
-
-    result.match(
-      (txResult) => {
-        toast.success("Counter incremented!", {
-          description: `Transaction: ${txResult.digest.slice(0, 8)}...`,
-        });
-        refetch();
-      },
-      (errorMsg) => {
-        toast.error("Failed to increment counter", {
-          description: errorMsg,
-        });
-      },
-    );
-
-    setIsIncrementing(false);
+    if (!data) return;
+    const currentValue = Number.parseInt(data.value, 10);
+    await walrusCounter.increment({ counterId: id, currentValue });
   };
 
   const handleSetValue = async (value: number) => {
-    if (!currentAccount) return;
-
-    setIsSettingValue(true);
-
-    const result = await ResultAsync.fromPromise(
-      (async () => {
-        const newBlobId = await createCounterBlob(value, currentAccount.address);
-
-        // Replace blob in counter
-        const tx = new Transaction();
-        walrusCounter.replace({
-          package: counterPackageId,
-          arguments: [tx.object(id), tx.object(newBlobId)],
-        })(tx);
-        const txResult = await signAndExecuteTransaction({ transaction: tx });
-
-        return txResult;
-      })(),
-      (err) => {
-        const errorMsg = err instanceof Error ? err.message : "Unknown error";
-        return errorMsg;
-      },
-    );
-
-    result.match(
-      (txResult) => {
-        toast.success("Counter value updated!", {
-          description: `Transaction: ${txResult.digest.slice(0, 8)}...`,
-        });
-        refetch();
-      },
-      (errorMsg) => {
-        toast.error("Failed to set counter value", {
-          description: errorMsg,
-        });
-      },
-    );
-
-    setIsSettingValue(false);
+    await walrusCounter.setValue({ counterId: id, value });
   };
 
   const hasDataIssue = !isLoading && !error && !data;

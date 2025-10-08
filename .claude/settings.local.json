@@ -182,7 +182,9 @@
       "WebFetch(domain:docs.wal.app)",
       "Bash(for publisher in \"https://publisher.walrus-testnet.walrus.space/v1\" \"https://walrus-testnet-publisher.chainbase.online/v1\" \"https://publisher.walrus-01.tududes.com/v1\" \"https://walrus-testnet-publisher.nodes.guru/v1\")",
       "Bash(do)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(for url in \"https://publisher.walrus-testnet.walrus.space/v1\" \"https://walrus-testnet-publisher.nodes.guru/v1\" \"https://walrus-testnet-publisher.chainbase.online/v1\" \"https://publisher.walrus-01.tududes.com/v1\")",
+      "Bash(do echo \"Testing: $url\")"
     ],
     "deny": [],
     "ask": []
