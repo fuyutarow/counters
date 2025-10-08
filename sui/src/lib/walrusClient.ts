@@ -136,12 +136,14 @@ export async function storeBlob(data: Uint8Array | string, ownerAddress?: string
  * Read data from Walrus
  */
 export async function readBlob(blobId: string): Promise<Uint8Array> {
-  const response = await fetch(`${AGGREGATOR_URL}/v1/${blobId}`);
+  const url = `${AGGREGATOR_URL}/v1/${blobId}`;
+
+  const response = await fetch(url);
 
   if (!response.ok) {
-    throw new Error(`Failed to read blob: ${response.statusText}`);
+    const errorMsg = `Failed to read blob from Walrus: ${response.status} ${response.statusText}`;
+    throw new Error(errorMsg);
   }
-
   return new Uint8Array(await response.arrayBuffer());
 }
 

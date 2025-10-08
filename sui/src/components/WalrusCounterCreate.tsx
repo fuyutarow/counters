@@ -11,12 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
 import { createCounterBlob } from "@/lib/walrusClient";
+import { useNetworkVariable } from "@/networkConfig";
 
 export function WalrusCounterCreate({ onSuccess }: { onSuccess?: () => void }) {
   const router = useRouter();
   const currentAccount = useCurrentAccount();
   const suiClient = useSuiClient();
   const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction();
+  const counterPackageId = useNetworkVariable("counterPackageId");
   const [isCreating, setIsCreating] = useState(false);
 
   async function handleCreate() {
@@ -29,21 +31,18 @@ export function WalrusCounterCreate({ onSuccess }: { onSuccess?: () => void }) {
 
     const result = await ResultAsync.fromPromise(
       (async () => {
-        // Step 1: Create Walrus blob with initial counter value
         toast.info("Creating Walrus blob...");
-        const blobId = await createCounterBlob(0);
-
-        // Step 2: Create WalrusCounter with blob
+        const blobId = await createCounterBlob(0, currentAccount.address);
         toast.info("Creating WalrusCounter on-chain...");
         const tx = new Transaction();
-        const counter = walrusCounter._new({ arguments: [tx.object(blobId)] })(tx);
+        const counter = walrusCounter._new({
+          package: counterPackageId,
+          arguments: [tx.object(blobId)],
+        })(tx);
         tx.transferObjects([counter], currentAccount.address);
-
         const txResult = await signAndExecuteTransaction({
           transaction: tx,
         });
-
-        // Wait for transaction to get effects
         const txResponse = await suiClient.waitForTransaction({
           digest: txResult.digest,
           options: {
@@ -61,7 +60,10 @@ export function WalrusCounterCreate({ onSuccess }: { onSuccess?: () => void }) {
           digest: txResult.digest,
         };
       })(),
-      (err) => (err instanceof Error ? err.message : "Unknown error"),
+      (err) => {
+        const errorMsg = err instanceof Error ? err.message : "Unknown error";
+        return errorMsg;
+      },
     );
 
     result.match(

@@ -13,6 +13,7 @@ import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
 import { createCounterBlob, readCounterValue } from "@/lib/walrusClient";
+import { useNetworkVariable } from "@/networkConfig";
 
 /**
  * WalrusCounter Move構造体のフィールド型定義
@@ -38,6 +39,7 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
   const currentAccount = useCurrentAccount();
   const suiClient = useSuiClient();
   const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction();
+  const counterPackageId = useNetworkVariable("counterPackageId");
   const [isIncrementing, setIsIncrementing] = useState(false);
   const [isSettingValue, setIsSettingValue] = useState(false);
 
@@ -57,19 +59,26 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
       const parseResult = walrusCounterFieldsSchema.safeParse(obj.data.content.fields);
 
       if (!parseResult.success) {
-        throw new Error(`Invalid WalrusCounter fields: ${parseResult.error.message}`);
+        const error = `Invalid WalrusCounter fields: ${parseResult.error.message}`;
+        throw new Error(error);
       }
 
       const blobId = parseResult.data.blob.fields.blob_id;
 
       // Read counter value from Walrus blob
-      const counterValue = await readCounterValue(blobId);
+      try {
+        const counterValue = await readCounterValue(blobId);
 
-      return {
-        id,
-        blobId,
-        value: String(counterValue),
-      };
+        return {
+          id,
+          blobId,
+          value: String(counterValue),
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        // Re-throw with more context
+        throw new Error(`Failed to read blob from Walrus (blob_id: ${blobId}): ${errorMsg}`);
+      }
     },
     enabled: !!id,
   });
@@ -83,26 +92,35 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
       (async () => {
         // Read current value
         const currentValue = Number.parseInt(data.value, 10);
-
-        // Create new blob with incremented value
-        const newBlobId = await createCounterBlob(currentValue + 1);
+        const newBlobId = await createCounterBlob(currentValue + 1, currentAccount.address);
 
         // Replace blob in counter
         const tx = new Transaction();
-        walrusCounter.replace({ arguments: [tx.object(id), tx.object(newBlobId)] })(tx);
+        walrusCounter.replace({
+          package: counterPackageId,
+          arguments: [tx.object(id), tx.object(newBlobId)],
+        })(tx);
+        const txResult = await signAndExecuteTransaction({ transaction: tx });
 
-        await signAndExecuteTransaction({ transaction: tx });
+        return txResult;
       })(),
-      (err) => (err instanceof Error ? err.message : "Unknown error"),
+      (err) => {
+        const errorMsg = err instanceof Error ? err.message : "Unknown error";
+        return errorMsg;
+      },
     );
 
     result.match(
-      () => {
-        toast.success("Counter incremented!");
+      (txResult) => {
+        toast.success("Counter incremented!", {
+          description: `Transaction: ${txResult.digest.slice(0, 8)}...`,
+        });
         refetch();
       },
-      () => {
-        toast.error("Failed to increment counter");
+      (errorMsg) => {
+        toast.error("Failed to increment counter", {
+          description: errorMsg,
+        });
       },
     );
 
@@ -116,25 +134,35 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
 
     const result = await ResultAsync.fromPromise(
       (async () => {
-        // Create new blob with specified value
-        const newBlobId = await createCounterBlob(value);
+        const newBlobId = await createCounterBlob(value, currentAccount.address);
 
         // Replace blob in counter
         const tx = new Transaction();
-        walrusCounter.replace({ arguments: [tx.object(id), tx.object(newBlobId)] })(tx);
+        walrusCounter.replace({
+          package: counterPackageId,
+          arguments: [tx.object(id), tx.object(newBlobId)],
+        })(tx);
+        const txResult = await signAndExecuteTransaction({ transaction: tx });
 
-        await signAndExecuteTransaction({ transaction: tx });
+        return txResult;
       })(),
-      (err) => (err instanceof Error ? err.message : "Unknown error"),
+      (err) => {
+        const errorMsg = err instanceof Error ? err.message : "Unknown error";
+        return errorMsg;
+      },
     );
 
     result.match(
-      () => {
-        toast.success("Counter value updated!");
+      (txResult) => {
+        toast.success("Counter value updated!", {
+          description: `Transaction: ${txResult.digest.slice(0, 8)}...`,
+        });
         refetch();
       },
-      () => {
-        toast.error("Failed to set counter value");
+      (errorMsg) => {
+        toast.error("Failed to set counter value", {
+          description: errorMsg,
+        });
       },
     );
 

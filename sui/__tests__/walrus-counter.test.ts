@@ -26,16 +26,11 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
   it("should create a Walrus counter", async () => {
     const signerAddress = keyInfo.keypair.toSuiAddress();
     const blobObjectId = await createCounterBlob(0, signerAddress);
-
-    // Wait for blob to be fully finalized on chain
     await new Promise((resolve) => setTimeout(resolve, 5000));
-
-    // Verify blob exists and is owned by signer
     const _blobObject = await client.getObject({
       id: blobObjectId,
       options: { showOwner: true, showType: true, showContent: true },
     });
-
     const tx = new Transaction();
     const counter = walrusCounter._new({
       package: COUNTER_PACKAGE_ID,
@@ -43,7 +38,6 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
     })(tx);
 
     tx.transferObjects([counter], signerAddress);
-
     const result = await client.signAndExecuteTransaction({
       transaction: tx,
       signer: keyInfo.keypair,
@@ -54,12 +48,14 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
     });
 
     if (result.effects?.status.status !== "success") {
-      throw new Error(`Transaction failed: ${result.effects?.status.error || "Unknown error"}`);
+      const error = `Transaction failed: ${result.effects?.status.error || "Unknown error"}`;
+      throw new Error(error);
     }
 
     const createdObject = result.effects?.created?.[0];
     if (!createdObject?.reference?.objectId) {
-      throw new Error("Failed to get created object ID");
+      const error = "Failed to get created object ID";
+      throw new Error(error);
     }
   });
 
