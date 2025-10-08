@@ -18,9 +18,6 @@ bun.lockb
 # @mysten/codegen generated summaries
 **/package_summaries/
 
-# Environment-specific package overrides
-suigen-config.local.json
-
 # WASM build artifacts
 wasm/*/target/
 wasm/*/Cargo.lock
