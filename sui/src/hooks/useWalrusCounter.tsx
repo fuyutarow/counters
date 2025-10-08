@@ -132,6 +132,7 @@ export function useWalrusCounter() {
   const queryClient = useQueryClient();
   const account = useCurrentAccount();
   const counterPackageId = useNetworkVariable("counterPackageId");
+  const walrusPackageId = useNetworkVariable("walrusPackageId");
 
   // ================== Create WalrusCounter ==================
   const createWalrusCounter = useMutation({
@@ -217,6 +218,7 @@ export function useWalrusCounter() {
       })(tx);
       // Delete the old blob instead of transferring it
       walrusBlob.burn({
+        package: walrusPackageId,
         arguments: [oldBlob],
       })(tx);
 
@@ -273,6 +275,7 @@ export function useWalrusCounter() {
       })(tx);
       // Delete the old blob instead of transferring it
       walrusBlob.burn({
+        package: walrusPackageId,
         arguments: [oldBlob],
       })(tx);
 
