@@ -29,7 +29,10 @@
       "suspicious": {
         "noExplicitAny": "error",
         "noImplicitAnyLet": "error",
-        "noConsole": "error"
+        "noConsole": {
+          "level": "error",
+          "fix": "none"
+        }
       },
       "complexity": {
         "noBannedTypes": "error",

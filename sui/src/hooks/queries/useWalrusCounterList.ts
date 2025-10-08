@@ -2,13 +2,14 @@ import { useCurrentAccount, useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import consola from "consola";
 import { z } from "zod";
+import { blobIdFromInt } from "@/lib/walrusClient";
 import { useNetworkVariable } from "@/networkConfig";
 
 // Zod schema for WalrusCounter
 const WalrusCounterSchema = z.object({
   blob: z.object({
     fields: z.object({
-      blob_id: z.string(),
+      blob_id: z.union([z.string(), z.number()]),
     }),
   }),
 });
@@ -78,9 +79,15 @@ export function useWalrusCounterList() {
           continue;
         }
 
+        const rawBlobId = parseResult.data.blob.fields.blob_id;
+        const blobId =
+          typeof rawBlobId === "string" && /[A-Za-z_-]/.test(rawBlobId)
+            ? rawBlobId
+            : blobIdFromInt(typeof rawBlobId === "number" ? BigInt(rawBlobId) : rawBlobId);
+
         counters.push({
           id: objectId,
-          blobId: parseResult.data.blob.fields.blob_id,
+          blobId,
           version,
         });
       }
