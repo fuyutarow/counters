@@ -10,10 +10,12 @@ import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import consola from "consola";
 import { ResultAsync } from "neverthrow";
 import { toast } from "sonner";
 import { z } from "zod";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
+import * as walrusBlob from "@/generated/walrus/blob";
 import { blobIdFromInt, createCounterBlob, readCounterValue } from "@/lib/walrusClient";
 import { useNetworkVariable } from "@/networkConfig";
 
@@ -49,6 +51,8 @@ export function useWalrusCounterValue(counterId?: string) {
 
   return useQuery({
     queryKey: ["walrus-counter", counterId],
+    retry: 3, // Retry failed requests (for blob propagation)
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 8000), // Exponential backoff
     queryFn: async () => {
       if (!counterId) return null;
 
@@ -80,7 +84,7 @@ export function useWalrusCounterValue(counterId?: string) {
         readCounterValue(blobId),
         (error) =>
           new Error(
-            `Failed to read blob from Walrus (blob_id: ${blobId}): ${
+            `Failed to read blob from Walrus (blob_id: ${blobId}). If this is a newly created blob, it may take a few seconds to propagate to the aggregator. Please refresh the page in a moment. Error: ${
               error instanceof Error ? error.message : String(error)
             }`,
           ),
@@ -128,6 +132,7 @@ export function useWalrusCounter() {
   const queryClient = useQueryClient();
   const account = useCurrentAccount();
   const counterPackageId = useNetworkVariable("counterPackageId");
+  const walrusPackageId = useNetworkVariable("walrusPackageId");
 
   // ================== Create WalrusCounter ==================
   const createWalrusCounter = useMutation({
@@ -137,14 +142,17 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      toast.info("Creating Walrus blob...");
-      const blobObjectId = await createCounterBlob(0, account.address);
+      const startTime = performance.now();
+      consola.log("[WalrusCounter] 🚀 Starting create operation");
 
-      // Wait for blob propagation (learned from tests)
-      toast.info("Waiting for blob propagation...");
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      toast.info("Creating Walrus blob (this may take 20-30 seconds)...");
+      const blobStartTime = performance.now();
+      const blobObjectId = await createCounterBlob(0, account.address);
+      const blobDuration = ((performance.now() - blobStartTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] ✅ Blob created in ${blobDuration}s - ID: ${blobObjectId}`);
 
       toast.info("Creating WalrusCounter on-chain...");
+      const txStartTime = performance.now();
       const tx = new Transaction();
       const counter = walrusCounter._new({
         package: counterPackageId,
@@ -153,11 +161,20 @@ export function useWalrusCounter() {
       tx.transferObjects([counter], account.address);
 
       const result = await executeTransaction({ transaction: tx });
+      const txDuration = ((performance.now() - txStartTime) / 1000).toFixed(2);
+      consola.log(
+        `[WalrusCounter] ✅ Transaction executed in ${txDuration}s - Digest: ${result.digest}`,
+      );
+
       const created = result.objectChanges?.find((c: SuiObjectChange) => c.type === "created");
 
       if (!created || created.type !== "created") {
         throw new Error("Failed to create WalrusCounter");
       }
+
+      const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] 🎉 Total create operation completed in ${totalDuration}s`);
+      consola.log(`[WalrusCounter] 📊 Breakdown: Blob ${blobDuration}s + Tx ${txDuration}s`);
 
       showTxSuccessToast("WalrusCounter created successfully!", result.digest);
       await queryClient.invalidateQueries({ queryKey: ["walrus-counters"] });
@@ -179,24 +196,41 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      // Create new blob with incremented value
-      toast.info("Creating new blob...");
-      const newBlobObjectId = await createCounterBlob(params.currentValue + 1, account.address);
+      const startTime = performance.now();
+      consola.log(
+        `[WalrusCounter] 🚀 Starting increment operation (${params.currentValue} → ${params.currentValue + 1})`,
+      );
 
-      // Wait for blob propagation (learned from tests)
-      toast.info("Waiting for blob propagation...");
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      // Create new blob with incremented value (takes 20-30s)
+      toast.info("Creating new blob (this may take 20-30 seconds)...");
+      const blobStartTime = performance.now();
+      const newBlobObjectId = await createCounterBlob(params.currentValue + 1, account.address);
+      const blobDuration = ((performance.now() - blobStartTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] ✅ Blob created in ${blobDuration}s - ID: ${newBlobObjectId}`);
 
       // Replace blob in counter
       toast.info("Updating counter on-chain...");
+      const txStartTime = performance.now();
       const tx = new Transaction();
       const oldBlob = walrusCounter.replace({
         package: counterPackageId,
         arguments: [tx.object(params.counterId), tx.object(newBlobObjectId)],
       })(tx);
-      tx.transferObjects([oldBlob], account.address);
+      // Delete the old blob instead of transferring it
+      walrusBlob.burn({
+        package: walrusPackageId,
+        arguments: [oldBlob],
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
+      const txDuration = ((performance.now() - txStartTime) / 1000).toFixed(2);
+      consola.log(
+        `[WalrusCounter] ✅ Transaction executed in ${txDuration}s - Digest: ${result.digest}`,
+      );
+
+      const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] 🎉 Total increment operation completed in ${totalDuration}s`);
+      consola.log(`[WalrusCounter] 📊 Breakdown: Blob ${blobDuration}s + Tx ${txDuration}s`);
 
       showTxSuccessToast("Counter incremented successfully!", result.digest);
 
@@ -221,24 +255,39 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      // Create new blob with target value
-      toast.info("Creating new blob...");
-      const newBlobObjectId = await createCounterBlob(params.value, account.address);
+      const startTime = performance.now();
+      consola.log(`[WalrusCounter] 🚀 Starting setValue operation (target: ${params.value})`);
 
-      // Wait for blob propagation (learned from tests)
-      toast.info("Waiting for blob propagation...");
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      // Create new blob with target value (takes 20-30s)
+      toast.info("Creating new blob (this may take 20-30 seconds)...");
+      const blobStartTime = performance.now();
+      const newBlobObjectId = await createCounterBlob(params.value, account.address);
+      const blobDuration = ((performance.now() - blobStartTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] ✅ Blob created in ${blobDuration}s - ID: ${newBlobObjectId}`);
 
       // Replace blob in counter
       toast.info("Updating counter on-chain...");
+      const txStartTime = performance.now();
       const tx = new Transaction();
       const oldBlob = walrusCounter.replace({
         package: counterPackageId,
         arguments: [tx.object(params.counterId), tx.object(newBlobObjectId)],
       })(tx);
-      tx.transferObjects([oldBlob], account.address);
+      // Delete the old blob instead of transferring it
+      walrusBlob.burn({
+        package: walrusPackageId,
+        arguments: [oldBlob],
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
+      const txDuration = ((performance.now() - txStartTime) / 1000).toFixed(2);
+      consola.log(
+        `[WalrusCounter] ✅ Transaction executed in ${txDuration}s - Digest: ${result.digest}`,
+      );
+
+      const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] 🎉 Total setValue operation completed in ${totalDuration}s`);
+      consola.log(`[WalrusCounter] 📊 Breakdown: Blob ${blobDuration}s + Tx ${txDuration}s`);
 
       showTxSuccessToast(`Counter set to ${params.value}!`, result.digest);
 

@@ -3,6 +3,7 @@
  */
 
 import { bcs } from "@mysten/sui/bcs";
+import { ResultAsync } from "neverthrow";
 import { z } from "zod";
 
 // Using Graphyte's public aggregator and publisher
@@ -190,7 +191,9 @@ export function blobIdFromInt(blobId: bigint | string): string {
  * @returns Walrus blob ID in base64url format
  */
 export async function getBlobIdFromObject(
-  suiClient: { getObject: (params: unknown) => Promise<unknown> },
+  suiClient: {
+    getObject: (params: { id: string; options: { showContent: boolean } }) => Promise<unknown>;
+  },
   blobObjectId: string,
 ): Promise<string> {
   const blobObjectSchema = z.object({
@@ -238,18 +241,72 @@ export async function readCounterValue(blobId: string): Promise<bigint> {
 }
 
 /**
+ * Wait for blob to be available on aggregators with polling
+ *
+ * Better than fixed sleep: adapts to actual propagation time
+ *
+ * @param blobId - Blob ID to check
+ * @param options - Polling options
+ * @returns true when blob is available
+ */
+export async function waitForBlobAvailable(
+  blobId: string,
+  options: {
+    maxAttempts?: number;
+    initialDelay?: number;
+    maxDelay?: number;
+    timeout?: number;
+  } = {},
+): Promise<boolean> {
+  const { maxAttempts = 10, initialDelay = 1000, maxDelay = 5000, timeout = 30000 } = options;
+
+  const startTime = Date.now();
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    // Check timeout
+    if (Date.now() - startTime > timeout) {
+      throw new Error(`Timeout waiting for blob ${blobId} to be available on aggregators`);
+    }
+
+    // Try to read the blob using ResultAsync
+    const readResult = await ResultAsync.fromPromise(readBlob(blobId), (e) => e);
+
+    if (readResult.isOk()) {
+      return true; // Success!
+    }
+
+    attempt++;
+
+    // If this was the last attempt, throw
+    if (attempt >= maxAttempts) {
+      throw new Error(
+        `Blob ${blobId} not available after ${maxAttempts} attempts. It may still be propagating to aggregators.`,
+      );
+    }
+
+    // Exponential backoff: 1s, 2s, 4s, 5s (max), 5s, ...
+    const delay = Math.min(initialDelay * 2 ** attempt, maxDelay);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  return false;
+}
+
+/**
  * Create counter value blob in Walrus (BCS encoded)
  *
  * @param value - number | string | bigint (BCS u64の入力型)
  * @param ownerAddress - Optional Sui address to send the Blob object to
- * @returns Sui object ID of the created Blob object
+ * @returns Sui blob object ID
  */
 export async function createCounterBlob(
   value: WalrusCounterValueInput["value"],
   ownerAddress?: string,
 ): Promise<string> {
   const bcsBytes = CounterValueBcs.serialize({ value }).toBytes();
-  return await storeBlob(bcsBytes, ownerAddress);
+  const blobObjectId = await storeBlob(bcsBytes, ownerAddress);
+  return blobObjectId;
 }
 
 /**
@@ -267,7 +324,9 @@ export async function createCounterBlob(
  * @returns New blob object ID (to be used with replace())
  */
 export async function incrementWalrusCounter(
-  suiClient: { getObject: (params: unknown) => Promise<unknown> },
+  suiClient: {
+    getObject: (params: { id: string; options: { showContent: boolean } }) => Promise<unknown>;
+  },
   _counterObjectId: string,
   currentBlobObjectId: string,
   signerAddress: string,

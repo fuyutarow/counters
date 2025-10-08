@@ -27,6 +27,11 @@ const config: SuiCodegenConfig = {
       /** Move パッケージのローカルパス */
       path: "./move/counter",
     },
+    {
+      /** Walrus パッケージ（テストネット版・ローカルパス） */
+      package: "Walrus",
+      path: "/home/fuyu/MYSTENLABS/walrus/testnet-contracts/walrus",
+    },
   ],
 };
 
