@@ -10,17 +10,13 @@ import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import consola from "consola";
 import { ResultAsync } from "neverthrow";
 import { toast } from "sonner";
 import { z } from "zod";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
-import {
-  blobIdFromInt,
-  createCounterBlob,
-  getBlobIdFromObject,
-  readCounterValue,
-  waitForBlobAvailable,
-} from "@/lib/walrusClient";
+import * as walrusBlob from "@/generated/walrus/blob";
+import { blobIdFromInt, createCounterBlob, readCounterValue } from "@/lib/walrusClient";
 import { useNetworkVariable } from "@/networkConfig";
 
 const walrusCounterFieldsSchema = z.object({
@@ -145,15 +141,17 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      toast.info("Creating Walrus blob (this may take 20-30 seconds)...");
-      const blobObjectId = await createCounterBlob(0, account.address);
+      const startTime = performance.now();
+      consola.log("[WalrusCounter] 🚀 Starting create operation");
 
-      // Get actual blob ID from Sui object and wait for propagation
-      toast.info("Waiting for blob to be available on aggregators...");
-      const blobId = await getBlobIdFromObject(suiClient, blobObjectId);
-      await waitForBlobAvailable(blobId, { timeout: 30000 });
+      toast.info("Creating Walrus blob (this may take 20-30 seconds)...");
+      const blobStartTime = performance.now();
+      const blobObjectId = await createCounterBlob(0, account.address);
+      const blobDuration = ((performance.now() - blobStartTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] ✅ Blob created in ${blobDuration}s - ID: ${blobObjectId}`);
 
       toast.info("Creating WalrusCounter on-chain...");
+      const txStartTime = performance.now();
       const tx = new Transaction();
       const counter = walrusCounter._new({
         package: counterPackageId,
@@ -162,11 +160,20 @@ export function useWalrusCounter() {
       tx.transferObjects([counter], account.address);
 
       const result = await executeTransaction({ transaction: tx });
+      const txDuration = ((performance.now() - txStartTime) / 1000).toFixed(2);
+      consola.log(
+        `[WalrusCounter] ✅ Transaction executed in ${txDuration}s - Digest: ${result.digest}`,
+      );
+
       const created = result.objectChanges?.find((c: SuiObjectChange) => c.type === "created");
 
       if (!created || created.type !== "created") {
         throw new Error("Failed to create WalrusCounter");
       }
+
+      const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] 🎉 Total create operation completed in ${totalDuration}s`);
+      consola.log(`[WalrusCounter] 📊 Breakdown: Blob ${blobDuration}s + Tx ${txDuration}s`);
 
       showTxSuccessToast("WalrusCounter created successfully!", result.digest);
       await queryClient.invalidateQueries({ queryKey: ["walrus-counters"] });
@@ -188,25 +195,40 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
+      const startTime = performance.now();
+      consola.log(
+        `[WalrusCounter] 🚀 Starting increment operation (${params.currentValue} → ${params.currentValue + 1})`,
+      );
+
       // Create new blob with incremented value (takes 20-30s)
       toast.info("Creating new blob (this may take 20-30 seconds)...");
+      const blobStartTime = performance.now();
       const newBlobObjectId = await createCounterBlob(params.currentValue + 1, account.address);
-
-      // Get actual blob ID and wait for propagation with smart polling
-      toast.info("Waiting for blob propagation to aggregators...");
-      const newBlobId = await getBlobIdFromObject(suiClient, newBlobObjectId);
-      await waitForBlobAvailable(newBlobId, { timeout: 30000 });
+      const blobDuration = ((performance.now() - blobStartTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] ✅ Blob created in ${blobDuration}s - ID: ${newBlobObjectId}`);
 
       // Replace blob in counter
       toast.info("Updating counter on-chain...");
+      const txStartTime = performance.now();
       const tx = new Transaction();
       const oldBlob = walrusCounter.replace({
         package: counterPackageId,
         arguments: [tx.object(params.counterId), tx.object(newBlobObjectId)],
       })(tx);
-      tx.transferObjects([oldBlob], account.address);
+      // Delete the old blob instead of transferring it
+      walrusBlob.burn({
+        arguments: [oldBlob],
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
+      const txDuration = ((performance.now() - txStartTime) / 1000).toFixed(2);
+      consola.log(
+        `[WalrusCounter] ✅ Transaction executed in ${txDuration}s - Digest: ${result.digest}`,
+      );
+
+      const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] 🎉 Total increment operation completed in ${totalDuration}s`);
+      consola.log(`[WalrusCounter] 📊 Breakdown: Blob ${blobDuration}s + Tx ${txDuration}s`);
 
       showTxSuccessToast("Counter incremented successfully!", result.digest);
 
@@ -231,25 +253,38 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
+      const startTime = performance.now();
+      consola.log(`[WalrusCounter] 🚀 Starting setValue operation (target: ${params.value})`);
+
       // Create new blob with target value (takes 20-30s)
       toast.info("Creating new blob (this may take 20-30 seconds)...");
+      const blobStartTime = performance.now();
       const newBlobObjectId = await createCounterBlob(params.value, account.address);
-
-      // Get actual blob ID and wait for propagation with smart polling
-      toast.info("Waiting for blob propagation to aggregators...");
-      const newBlobId = await getBlobIdFromObject(suiClient, newBlobObjectId);
-      await waitForBlobAvailable(newBlobId, { timeout: 30000 });
+      const blobDuration = ((performance.now() - blobStartTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] ✅ Blob created in ${blobDuration}s - ID: ${newBlobObjectId}`);
 
       // Replace blob in counter
       toast.info("Updating counter on-chain...");
+      const txStartTime = performance.now();
       const tx = new Transaction();
       const oldBlob = walrusCounter.replace({
         package: counterPackageId,
         arguments: [tx.object(params.counterId), tx.object(newBlobObjectId)],
       })(tx);
-      tx.transferObjects([oldBlob], account.address);
+      // Delete the old blob instead of transferring it
+      walrusBlob.burn({
+        arguments: [oldBlob],
+      })(tx);
 
       const result = await executeTransaction({ transaction: tx });
+      const txDuration = ((performance.now() - txStartTime) / 1000).toFixed(2);
+      consola.log(
+        `[WalrusCounter] ✅ Transaction executed in ${txDuration}s - Digest: ${result.digest}`,
+      );
+
+      const totalDuration = ((performance.now() - startTime) / 1000).toFixed(2);
+      consola.log(`[WalrusCounter] 🎉 Total setValue operation completed in ${totalDuration}s`);
+      consola.log(`[WalrusCounter] 📊 Breakdown: Blob ${blobDuration}s + Tx ${txDuration}s`);
 
       showTxSuccessToast(`Counter set to ${params.value}!`, result.digest);
 
