@@ -1,11 +1,10 @@
 [package]
 name = "Counter"
 version = "0.0.1"
-edition = "2024.beta"
+edition = "2024"
 
 [dependencies]
-# seal = { local = "../../../MYSTENLABS/seal/move/seal" }
-seal = { local = "../seal" }
+Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }
 
 [addresses]
 counter = "0x0"
