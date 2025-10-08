@@ -14,7 +14,13 @@ import { ResultAsync } from "neverthrow";
 import { toast } from "sonner";
 import { z } from "zod";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
-import { blobIdFromInt, createCounterBlob, readCounterValue } from "@/lib/walrusClient";
+import {
+  blobIdFromInt,
+  createCounterBlob,
+  getBlobIdFromObject,
+  readCounterValue,
+  waitForBlobAvailable,
+} from "@/lib/walrusClient";
 import { useNetworkVariable } from "@/networkConfig";
 
 const walrusCounterFieldsSchema = z.object({
@@ -49,6 +55,8 @@ export function useWalrusCounterValue(counterId?: string) {
 
   return useQuery({
     queryKey: ["walrus-counter", counterId],
+    retry: 3, // Retry failed requests (for blob propagation)
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 8000), // Exponential backoff
     queryFn: async () => {
       if (!counterId) return null;
 
@@ -80,7 +88,7 @@ export function useWalrusCounterValue(counterId?: string) {
         readCounterValue(blobId),
         (error) =>
           new Error(
-            `Failed to read blob from Walrus (blob_id: ${blobId}): ${
+            `Failed to read blob from Walrus (blob_id: ${blobId}). If this is a newly created blob, it may take a few seconds to propagate to the aggregator. Please refresh the page in a moment. Error: ${
               error instanceof Error ? error.message : String(error)
             }`,
           ),
@@ -137,12 +145,13 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      toast.info("Creating Walrus blob...");
+      toast.info("Creating Walrus blob (this may take 20-30 seconds)...");
       const blobObjectId = await createCounterBlob(0, account.address);
 
-      // Wait for blob propagation (learned from tests)
-      toast.info("Waiting for blob propagation...");
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      // Get actual blob ID from Sui object and wait for propagation
+      toast.info("Waiting for blob to be available on aggregators...");
+      const blobId = await getBlobIdFromObject(suiClient, blobObjectId);
+      await waitForBlobAvailable(blobId, { timeout: 30000 });
 
       toast.info("Creating WalrusCounter on-chain...");
       const tx = new Transaction();
@@ -179,13 +188,14 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      // Create new blob with incremented value
-      toast.info("Creating new blob...");
+      // Create new blob with incremented value (takes 20-30s)
+      toast.info("Creating new blob (this may take 20-30 seconds)...");
       const newBlobObjectId = await createCounterBlob(params.currentValue + 1, account.address);
 
-      // Wait for blob propagation (learned from tests)
-      toast.info("Waiting for blob propagation...");
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      // Get actual blob ID and wait for propagation with smart polling
+      toast.info("Waiting for blob propagation to aggregators...");
+      const newBlobId = await getBlobIdFromObject(suiClient, newBlobObjectId);
+      await waitForBlobAvailable(newBlobId, { timeout: 30000 });
 
       // Replace blob in counter
       toast.info("Updating counter on-chain...");
@@ -221,13 +231,14 @@ export function useWalrusCounter() {
         throw new Error("No account connected");
       }
 
-      // Create new blob with target value
-      toast.info("Creating new blob...");
+      // Create new blob with target value (takes 20-30s)
+      toast.info("Creating new blob (this may take 20-30 seconds)...");
       const newBlobObjectId = await createCounterBlob(params.value, account.address);
 
-      // Wait for blob propagation (learned from tests)
-      toast.info("Waiting for blob propagation...");
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      // Get actual blob ID and wait for propagation with smart polling
+      toast.info("Waiting for blob propagation to aggregators...");
+      const newBlobId = await getBlobIdFromObject(suiClient, newBlobObjectId);
+      await waitForBlobAvailable(newBlobId, { timeout: 30000 });
 
       // Replace blob in counter
       toast.info("Updating counter on-chain...");
