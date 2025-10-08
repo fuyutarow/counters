@@ -4,15 +4,52 @@
  * Tests the complete flow of creating and updating a Walrus counter.
  */
 
+import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
+import { z } from "zod";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
-import { createCounterBlob, readCounterValue } from "@/lib/walrusClient";
+import {
+  createCounterBlob,
+  getBlobIdFromObject,
+  readBlob,
+  readCounterValue,
+  storeBlob,
+} from "@/lib/walrusClient";
 import { networkConfig } from "@/networkConfig";
 import { getCarol, type KeyInfo } from "./utils/keybook";
 
 const COUNTER_PACKAGE_ID = networkConfig.testnet.variables.counterPackageId;
+
+const blobObjectSchema = z.object({
+  data: z.object({
+    content: z.object({
+      dataType: z.literal("moveObject"),
+      fields: z.object({
+        id: z.object({ id: z.string() }),
+        blob_id: z.union([z.string(), z.number()]), // Can be either string or number
+      }),
+    }),
+  }),
+});
+
+const walrusCounterSchema = z.object({
+  data: z.object({
+    content: z.object({
+      dataType: z.literal("moveObject"),
+      fields: z.object({
+        id: z.object({ id: z.string() }),
+        blob: z.object({
+          fields: z.object({
+            id: z.object({ id: z.string() }),
+            blob_id: z.union([z.string(), z.number()]),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
 
 describe("Walrus Counter", { timeout: 60000 }, () => {
   let client: SuiClient;
@@ -23,10 +60,57 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
     keyInfo = getCarol();
   });
 
-  it("should create a Walrus counter", async () => {
+  it("should store and read blob data", { timeout: 30000 }, async () => {
+    const testData = new TextEncoder().encode("Hello Walrus!");
+    const signerAddress = keyInfo.keypair.toSuiAddress();
+
+    // Store blob
+    const blobObjectId = await storeBlob(testData, signerAddress);
+    assert.ok(blobObjectId, "Should return blob object ID");
+
+    // Wait for blob object to be created and propagated to aggregators
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+
+    // Get blob ID from blob object
+    const blobId = await getBlobIdFromObject(client, blobObjectId);
+    assert.ok(blobId, "Should have blob_id");
+
+    // Read blob
+    const retrievedData = await readBlob(blobId);
+    assert.deepStrictEqual(retrievedData, testData, "Retrieved data should match original");
+  });
+
+  it("should create and read counter blob with BCS encoding", { timeout: 60000 }, async () => {
+    const testValue = 42;
+    const signerAddress = keyInfo.keypair.toSuiAddress();
+
+    // Create counter blob
+    const blobObjectId = await createCounterBlob(testValue, signerAddress);
+    assert.ok(blobObjectId, "Should return blob object ID");
+
+    // Wait for blob object to be created and propagated to aggregators
+    await new Promise((resolve) => setTimeout(resolve, 30000));
+
+    // Get blob object to extract blob_id
+    const blobObject = await client.getObject({
+      id: blobObjectId,
+      options: { showContent: true },
+    });
+
+    const parseResult = blobObjectSchema.safeParse(blobObject);
+    assert.ok(parseResult.success, "Should have valid blob object structure");
+
+    const blobId = await getBlobIdFromObject(client, blobObjectId);
+
+    // Read counter value
+    const value = await readCounterValue(blobId);
+    assert.strictEqual(value, BigInt(testValue), "Counter value should match");
+  });
+
+  it("should create a Walrus counter", { timeout: 60000 }, async () => {
     const signerAddress = keyInfo.keypair.toSuiAddress();
     const blobObjectId = await createCounterBlob(0, signerAddress);
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 15000));
     const _blobObject = await client.getObject({
       id: blobObjectId,
       options: { showOwner: true, showType: true, showContent: true },
@@ -59,14 +143,86 @@ describe("Walrus Counter", { timeout: 60000 }, () => {
     }
   });
 
-  it.skip("should read counter value from Walrus blob", async () => {
-    // This test needs to be updated to use the blob ID from the blob object
-    // Currently createCounterBlob returns object ID, not blob ID
-    const blobId = await createCounterBlob(42);
-    const value = await readCounterValue(blobId);
+  it(
+    "should create, increment, and read counter through full lifecycle",
+    { timeout: 120000 },
+    async () => {
+      const signerAddress = keyInfo.keypair.toSuiAddress();
 
-    if (value !== 42n) {
-      throw new Error(`Expected 42n, got ${value}`);
-    }
-  }, 30000);
+      // 1. Create initial blob with value 0
+      const initialBlobObjectId = await createCounterBlob(0, signerAddress);
+      await new Promise((resolve) => setTimeout(resolve, 15000));
+
+      // 2. Create counter with initial blob
+      const tx1 = new Transaction();
+      const counter = walrusCounter._new({
+        package: COUNTER_PACKAGE_ID,
+        arguments: [tx1.object(initialBlobObjectId)],
+      })(tx1);
+      tx1.transferObjects([counter], signerAddress);
+
+      const createResult = await client.signAndExecuteTransaction({
+        transaction: tx1,
+        signer: keyInfo.keypair,
+        options: {
+          showEffects: true,
+          showObjectChanges: true,
+        },
+      });
+
+      assert.strictEqual(
+        createResult.effects?.status.status,
+        "success",
+        "Counter creation should succeed",
+      );
+
+      const createdCounterObj = createResult.effects?.created?.find(
+        (obj) =>
+          obj.owner === "Shared" || (typeof obj.owner === "object" && "AddressOwner" in obj.owner),
+      );
+      assert.ok(createdCounterObj?.reference?.objectId, "Should have created counter object");
+
+      const counterId = createdCounterObj.reference.objectId;
+
+      // 3. Increment counter (create new blob with value 1)
+      const newBlobObjectId = await createCounterBlob(1, signerAddress);
+      await new Promise((resolve) => setTimeout(resolve, 15000));
+
+      const tx2 = new Transaction();
+      walrusCounter.replace({
+        package: COUNTER_PACKAGE_ID,
+        arguments: [tx2.object(counterId), tx2.object(newBlobObjectId)],
+      })(tx2);
+
+      const replaceResult = await client.signAndExecuteTransaction({
+        transaction: tx2,
+        signer: keyInfo.keypair,
+        options: {
+          showEffects: true,
+          showObjectChanges: true,
+        },
+      });
+
+      assert.strictEqual(
+        replaceResult.effects?.status.status,
+        "success",
+        "Counter replace should succeed",
+      );
+
+      // 4. Read final counter value
+      const finalCounter = await client.getObject({
+        id: counterId,
+        options: { showContent: true },
+      });
+
+      const counterParseResult = walrusCounterSchema.safeParse(finalCounter);
+      assert.ok(counterParseResult.success, "Should have valid counter structure");
+
+      const finalBlobObjectId = counterParseResult.data.data.content.fields.blob.fields.id.id;
+      const finalBlobId = await getBlobIdFromObject(client, finalBlobObjectId);
+      const finalValue = await readCounterValue(finalBlobId);
+
+      assert.strictEqual(finalValue, 1n, "Counter value should be 1 after increment");
+    },
+  );
 });

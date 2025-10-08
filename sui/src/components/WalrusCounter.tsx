@@ -66,19 +66,25 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
       const blobId = parseResult.data.blob.fields.blob_id;
 
       // Read counter value from Walrus blob
-      try {
-        const counterValue = await readCounterValue(blobId);
+      const readResult = await ResultAsync.fromPromise(
+        readCounterValue(blobId),
+        (error) =>
+          new Error(
+            `Failed to read blob from Walrus (blob_id: ${blobId}): ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+      );
 
-        return {
-          id,
-          blobId,
-          value: String(counterValue),
-        };
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        // Re-throw with more context
-        throw new Error(`Failed to read blob from Walrus (blob_id: ${blobId}): ${errorMsg}`);
+      if (readResult.isErr()) {
+        throw readResult.error;
       }
+
+      return {
+        id,
+        blobId,
+        value: String(readResult.value),
+      };
     },
     enabled: !!id,
   });

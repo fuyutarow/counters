@@ -178,7 +178,11 @@
       "Bash(curl:*)",
       "Bash(/bin/grep -i script)",
       "Bash(bunx tsx:*)",
-      "Bash(ping:*)"
+      "Bash(ping:*)",
+      "WebFetch(domain:docs.wal.app)",
+      "Bash(for publisher in \"https://publisher.walrus-testnet.walrus.space/v1\" \"https://walrus-testnet-publisher.chainbase.online/v1\" \"https://publisher.walrus-01.tududes.com/v1\" \"https://walrus-testnet-publisher.nodes.guru/v1\")",
+      "Bash(do)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

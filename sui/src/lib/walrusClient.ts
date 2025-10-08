@@ -1,13 +1,20 @@
 /**
- * HTTP-based Walrus client for Next.js
- * Uses the Walrus HTTP API directly to avoid WASM build issues
+ * Walrus client using official @mysten/walrus SDK
  */
 
 import { bcs } from "@mysten/sui/bcs";
 import { z } from "zod";
 
-// Using Mysten's public aggregator and publisher
+// Using Graphyte's public aggregator and publisher
 // See: https://docs.walrus.site/usage/web-api.html
+//
+// NOTE: Public Walrus publishers provide free access but consume their own SUI/WAL tokens
+// The publisher operator pays for storage, not the client
+// Publishers may become unavailable when their token balance is depleted
+// For production use, consider:
+// - Running your own Walrus publisher node
+// - Using Walrus CLI directly
+// - Implementing fallback to multiple publishers
 const AGGREGATOR_URL = "https://aggregator.walrus-testnet.walrus.space";
 const PUBLISHER_URL = "https://publisher.walrus-testnet.walrus.space";
 
@@ -87,9 +94,14 @@ export type WalrusCounterValue = typeof CounterValueBcs.$inferType;
  *
  * @param data - Data to store (string or Uint8Array)
  * @param ownerAddress - Optional Sui address to send the Blob object to
+ * @param epochs - Number of epochs to store (default: 5 = ~17 hours on testnet)
  * @returns Sui object ID of the created Blob object
  */
-export async function storeBlob(data: Uint8Array | string, ownerAddress?: string): Promise<string> {
+export async function storeBlob(
+  data: Uint8Array | string,
+  ownerAddress?: string,
+  epochs = 5,
+): Promise<string> {
   // TypeScript型定義の問題:
   // - Uint8Array.bufferの型は ArrayBufferLike (= ArrayBuffer | SharedArrayBuffer)
   // - BodyInitが期待するのは ArrayBufferView<ArrayBuffer> | ArrayBuffer
@@ -98,6 +110,7 @@ export async function storeBlob(data: Uint8Array | string, ownerAddress?: string
   const body = (typeof data === "string" ? data : data.buffer) as BodyInit;
 
   const url = new URL(`${PUBLISHER_URL}/v1/blobs`);
+  url.searchParams.set("epochs", epochs.toString());
   if (ownerAddress) {
     url.searchParams.set("send_object_to", ownerAddress);
   }
@@ -111,7 +124,10 @@ export async function storeBlob(data: Uint8Array | string, ownerAddress?: string
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to store blob: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(
+      `Failed to store blob: ${response.status} ${response.statusText}\n${errorText}`,
+    );
   }
 
   const json = await response.json();
@@ -133,10 +149,13 @@ export async function storeBlob(data: Uint8Array | string, ownerAddress?: string
 }
 
 /**
- * Read data from Walrus
+ * Read data from Walrus by blob ID
+ *
+ * @param blobId - Walrus blob ID (32-byte hex string)
+ * @returns Raw blob data
  */
 export async function readBlob(blobId: string): Promise<Uint8Array> {
-  const url = `${AGGREGATOR_URL}/v1/${blobId}`;
+  const url = `${AGGREGATOR_URL}/v1/blobs/${blobId}`;
 
   const response = await fetch(url);
 
@@ -145,6 +164,65 @@ export async function readBlob(blobId: string): Promise<Uint8Array> {
     throw new Error(errorMsg);
   }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+/**
+ * Convert u256 blob ID to base64url format
+ *
+ * Based on @mysten/walrus SDK implementation
+ * @see https://github.com/mystenlabs/ts-sdks/blob/main/packages/walrus/src/utils/bcs.ts#L51-L59
+ */
+export function blobIdFromInt(blobId: bigint | string): string {
+  return bcs
+    .u256()
+    .serialize(blobId)
+    .toBase64()
+    .replace(/=*$/, "") // Remove padding
+    .replace(/\+/g, "-") // URL-safe
+    .replace(/\//g, "_"); // URL-safe
+}
+
+/**
+ * Get blob ID from Sui Blob object
+ *
+ * @param suiClient - Sui client instance
+ * @param blobObjectId - Sui Blob object ID
+ * @returns Walrus blob ID in base64url format
+ */
+export async function getBlobIdFromObject(
+  suiClient: { getObject: (params: unknown) => Promise<unknown> },
+  blobObjectId: string,
+): Promise<string> {
+  const blobObjectSchema = z.object({
+    data: z.object({
+      content: z.object({
+        dataType: z.literal("moveObject"),
+        fields: z.object({
+          blob_id: z.union([z.string(), z.number()]),
+        }),
+      }),
+    }),
+  });
+
+  const blobObject = await suiClient.getObject({
+    id: blobObjectId,
+    options: { showContent: true },
+  });
+
+  const parseResult = blobObjectSchema.safeParse(blobObject);
+  if (!parseResult.success) {
+    throw new Error(`Invalid Blob object: ${parseResult.error.message}`);
+  }
+
+  const blobId = parseResult.data.data.content.fields.blob_id;
+
+  // Already in base64url format if it contains letters
+  if (typeof blobId === "string" && /[A-Za-z_-]/.test(blobId)) {
+    return blobId;
+  }
+
+  // Convert u256 (stored as decimal string or number) to base64url
+  return blobIdFromInt(typeof blobId === "number" ? BigInt(blobId) : blobId);
 }
 
 /**
