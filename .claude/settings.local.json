@@ -177,7 +177,8 @@
       "Bash(/bin/grep -A 20 \"interface SuiObjectResponse\")",
       "Bash(curl:*)",
       "Bash(/bin/grep -i script)",
-      "Bash(bunx tsx:*)"
+      "Bash(bunx tsx:*)",
+      "Bash(ping:*)"
     ],
     "deny": [],
     "ask": []
