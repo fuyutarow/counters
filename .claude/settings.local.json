@@ -175,7 +175,9 @@
       "Bash(/bin/grep -B 2 -A 5 \"interface ArrayBufferView\")",
       "Bash(/bin/grep -A 10 \"interface ArrayBufferView\")",
       "Bash(/bin/grep -A 20 \"interface SuiObjectResponse\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(/bin/grep -i script)",
+      "Bash(bunx tsx:*)"
     ],
     "deny": [],
     "ask": []

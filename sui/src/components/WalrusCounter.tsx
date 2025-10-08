@@ -14,6 +14,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import * as walrusCounter from "@/generated/counter/walrus_counter";
 import { createCounterBlob, readCounterValue } from "@/lib/walrusClient";
 
+/**
+ * WalrusCounter Move構造体のフィールド型定義
+ *
+ * zodが必要な理由：
+ * - @mysten/sui SDKの型定義は `fields: { [key: string]: MoveValue }` と緩い
+ * - MoveValueは `number | boolean | string | ...` のユニオン型
+ * - 具体的なMove構造体の型情報が失われているため、zodで型を具体化する
+ */
 const walrusCounterFieldsSchema = z.object({
   blob: z.object({
     fields: z.object({
@@ -79,13 +87,9 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
         // Create new blob with incremented value
         const newBlobId = await createCounterBlob(currentValue + 1);
 
-        // Unwrap old blob and wrap new blob
+        // Replace blob in counter
         const tx = new Transaction();
-        const counterObj = tx.object(id);
-        walrusCounter.unwrap({ arguments: [counterObj] })(tx);
-
-        const newBlobObj = tx.object(newBlobId);
-        walrusCounter.wrap({ arguments: [newBlobObj] })(tx);
+        walrusCounter.replace({ arguments: [tx.object(id), tx.object(newBlobId)] })(tx);
 
         await signAndExecuteTransaction({ transaction: tx });
       })(),
@@ -115,13 +119,9 @@ export function WalrusCounter({ id }: WalrusCounterProps) {
         // Create new blob with specified value
         const newBlobId = await createCounterBlob(value);
 
-        // Unwrap old blob and wrap new blob
+        // Replace blob in counter
         const tx = new Transaction();
-        const counterObj = tx.object(id);
-        walrusCounter.unwrap({ arguments: [counterObj] })(tx);
-
-        const newBlobObj = tx.object(newBlobId);
-        walrusCounter.wrap({ arguments: [newBlobObj] })(tx);
+        walrusCounter.replace({ arguments: [tx.object(id), tx.object(newBlobId)] })(tx);
 
         await signAndExecuteTransaction({ transaction: tx });
       })(),

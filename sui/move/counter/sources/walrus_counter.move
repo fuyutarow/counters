@@ -1,34 +1,28 @@
-/// This example demonstrates an owned counter that stores its data in Walrus.
-/// The counter object wraps a Walrus Blob which contains the counter data.
-/// Rules:
-/// - anyone can create a walrus counter by wrapping a Blob
-/// - only the owner can unwrap and retrieve the Blob
 module counter::walrus_counter;
 
+use std::option;
 use walrus::blob::Blob;
 
-// === Structs ===
-
-/// An owned counter that wraps a Walrus Blob.
-/// The actual counter data is stored off-chain in Walrus blob storage.
-public struct WalrusCounter has key {
+public struct WalrusCounter has key, store {
     id: UID,
-    blob: Blob,
+    blob: option::Option<Blob>,
 }
 
-// === Public Functions ===
-
-/// Create and return a new WalrusCounter by wrapping a Blob.
-public fun wrap(blob: Blob, ctx: &mut TxContext): WalrusCounter {
+public fun new(blob: Blob, ctx: &mut TxContext): WalrusCounter {
     WalrusCounter {
         id: object::new(ctx),
-        blob,
+        blob: option::some(blob),
     }
 }
 
-/// Unwrap and return the Blob (only owner can call this).
-public fun unwrap(self: WalrusCounter): Blob {
-    let WalrusCounter { id, blob } = self;
-    object::delete(id);
-    blob
+public fun replace(self: &mut WalrusCounter, new_blob: Blob): Blob {
+    self.blob.swap(new_blob)
+}
+
+public fun blob(self: &WalrusCounter): &Blob {
+    option::borrow(&self.blob)
+}
+
+public fun take(self: &mut WalrusCounter): Blob {
+    option::extract(&mut self.blob)
 }
