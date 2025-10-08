@@ -3,54 +3,69 @@
  * Uses the Walrus HTTP API directly to avoid WASM build issues
  */
 
+import { z } from "zod";
+
 // Using Mysten's public aggregator and publisher
 // See: https://docs.walrus.site/usage/web-api.html
 const AGGREGATOR_URL = "https://aggregator.walrus-testnet.walrus.space";
 const PUBLISHER_URL = "https://publisher.walrus-testnet.walrus.space";
 
-export interface WalrusStoreResponse {
-  newlyCreated?: {
-    blobObject: {
-      id: string;
-      storedEpoch: number;
-      blobId: string;
-      size: number;
-      erasureCodeType: string;
-      certifiedEpoch: number;
-      storage: {
-        id: string;
-        startEpoch: number;
-        endEpoch: number;
-        storageSize: number;
-      };
-    };
-    encodedSize: number;
-    cost: number;
-  };
-  alreadyCertified?: {
-    blobId: string;
-    event: {
-      txDigest: string;
-      eventSeq: string;
-    };
-    endEpoch: number;
-  };
-}
+const walrusStoreResponseSchema = z.union([
+  z.object({
+    newlyCreated: z.object({
+      blobObject: z.object({
+        id: z.string(),
+        storedEpoch: z.number(),
+        blobId: z.string(),
+        size: z.number(),
+        erasureCodeType: z.string(),
+        certifiedEpoch: z.number(),
+        storage: z.object({
+          id: z.string(),
+          startEpoch: z.number(),
+          endEpoch: z.number(),
+          storageSize: z.number(),
+        }),
+      }),
+      encodedSize: z.number(),
+      cost: z.number(),
+    }),
+  }),
+  z.object({
+    alreadyCertified: z.object({
+      blobId: z.string(),
+      event: z.object({
+        txDigest: z.string(),
+        eventSeq: z.string(),
+      }),
+      endEpoch: z.number(),
+    }),
+  }),
+]);
 
 /**
  * Counter value stored in Walrus blob
  */
-export interface WalrusCounterValue {
-  value: number;
-}
+const walrusCounterValueSchema = z.object({
+  value: z.number(),
+});
+
+export type WalrusCounterValue = z.infer<typeof walrusCounterValueSchema>;
 
 /**
  * Store data on Walrus
  */
 export async function storeBlob(data: Uint8Array | string): Promise<string> {
+  // TypeScript型定義の問題:
+  // - Uint8Array.bufferの型は ArrayBufferLike (= ArrayBuffer | SharedArrayBuffer)
+  // - BodyInitが期待するのは ArrayBufferView<ArrayBuffer> | ArrayBuffer
+  // - ArrayBufferLikeとArrayBufferは名目型の違いで互換性がない
+  // - 実行時は動作するため、型アサーションで対応
+  const body = (typeof data === "string" ? data : data.buffer) as BodyInit;
+
   const response = await fetch(`${PUBLISHER_URL}/v1/store`, {
     method: "PUT",
-    body: data as BodyInit,
+    body,
     headers: {
       "Content-Type": "application/octet-stream",
     },
@@ -60,16 +75,21 @@ export async function storeBlob(data: Uint8Array | string): Promise<string> {
     throw new Error(`Failed to store blob: ${response.statusText}`);
   }
 
-  const result = (await response.json()) as WalrusStoreResponse;
+  const json = await response.json();
+  const parseResult = walrusStoreResponseSchema.safeParse(json);
 
-  if (result.newlyCreated) {
-    return result.newlyCreated.blobObject.blobId;
-  }
-  if (result.alreadyCertified) {
-    return result.alreadyCertified.blobId;
+  if (!parseResult.success) {
+    throw new Error(`Invalid Walrus response: ${parseResult.error.message}`);
   }
 
-  throw new Error("Unexpected response from Walrus");
+  const result = parseResult.data;
+
+  const blobId =
+    "newlyCreated" in result
+      ? result.newlyCreated.blobObject.blobId
+      : result.alreadyCertified.blobId;
+
+  return blobId;
 }
 
 /**
@@ -98,8 +118,14 @@ export async function readBlobAsText(blobId: string): Promise<string> {
  */
 export async function readCounterValue(blobId: string): Promise<number> {
   const text = await readBlobAsText(blobId);
-  const data: WalrusCounterValue = JSON.parse(text);
-  return data.value;
+  const json = JSON.parse(text);
+  const parseResult = walrusCounterValueSchema.safeParse(json);
+
+  if (!parseResult.success) {
+    throw new Error(`Invalid counter value: ${parseResult.error.message}`);
+  }
+
+  return parseResult.data.value;
 }
 
 /**
