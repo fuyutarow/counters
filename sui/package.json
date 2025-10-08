@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@mysten/bcs": "^1.8.0",
-    "@mysten/dapp-kit": "0.18.0",
-    "@mysten/seal": "^0.8.1",
-    "@mysten/sui": "1.38.0",
+    "@mysten/dapp-kit": "0.19.1",
+    "@mysten/seal": "^0.8.3",
+    "@mysten/sui": "1.39.1",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -30,7 +30,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "consola": "^3.4.2",
-    "lucide-react": "^0.544.0",
+    "lucide-react": "^0.545.0",
     "neverthrow": "^8.2.0",
     "next": "^15.5.4",
     "next-themes": "^0.4.6",
@@ -41,18 +41,18 @@
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.14",
     "ts-pattern": "^5.8.0",
-    "zod": "^4.1.11"
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.5",
-    "@eslint/js": "^9.36.0",
+    "@eslint/js": "^9.37.0",
     "@next/eslint-plugin-next": "^15.5.4",
-    "@playwright/test": "^1.55.1",
+    "@playwright/test": "^1.56.0",
     "@tailwindcss/postcss": "^4.1.14",
-    "@types/node": "^24.6.2",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "eslint": "^9.36.0",
+    "@types/node": "^24.7.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "eslint": "^9.37.0",
     "eslint-config-next": "^15.5.4",
     "typescript": "^5.9.3"
   }
