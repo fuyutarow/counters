@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import * as pedersenCounter from "@/generated/counter/pedersen_counter";
 import { useNetworkVariable } from "@/networkConfig";
 import { createSerializedCommitment } from "@/utils/pedersen";
+import { addIncrementRecord, saveCounterSecrets } from "@/utils/pedersenStorage";
 
 const buildExplorerLink = (digest: string): string =>
   `https://testnet.suivision.xyz/txblock/${digest}`;
@@ -92,6 +93,9 @@ export function usePedersenCounter() {
         throw new Error("Failed to create Pedersen counter");
       }
 
+      // Save secrets to localStorage for later opening
+      saveCounterSecrets(created.objectId, commitment.value, commitment.blinding);
+
       showTxSuccessToast("Pedersen counter created successfully!", result.digest);
       await queryClient.invalidateQueries({ queryKey: ["pedersen-counters"] });
 
@@ -122,6 +126,9 @@ export function usePedersenCounter() {
       })(tx);
 
       const result = await executeTransaction({ transaction: tx });
+
+      // Save increment secrets to localStorage
+      addIncrementRecord(params.counterId, commitment.value, commitment.blinding, result.digest);
 
       showTxSuccessToast(
         `Counter incremented by ${params.incrementValue} homomorphically!`,
