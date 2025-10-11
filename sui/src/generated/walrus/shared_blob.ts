@@ -52,7 +52,7 @@ export function newFunded(options: NewFundedOptions) {
   const packageAddress = options.package ?? "Walrus";
   const argumentsTypes = [
     `${packageAddress}::blob::Blob`,
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
   ] satisfies string[];
   const parameterNames = ["blob", "funds"];
   return (tx: Transaction) =>
@@ -78,7 +78,7 @@ export function fund(options: FundOptions) {
   const packageAddress = options.package ?? "Walrus";
   const argumentsTypes = [
     `${packageAddress}::shared_blob::SharedBlob`,
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
   ] satisfies string[];
   const parameterNames = ["self", "addedFunds"];
   return (tx: Transaction) =>

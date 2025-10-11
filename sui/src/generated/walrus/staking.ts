@@ -674,7 +674,7 @@ export function stakeWithPool(options: StakeWithPoolOptions) {
   const packageAddress = options.package ?? "Walrus";
   const argumentsTypes = [
     `${packageAddress}::staking::Staking`,
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
     "0x0000000000000000000000000000000000000000000000000000000000000002::object::ID",
   ] satisfies string[];
   const parameterNames = ["staking", "toStake", "nodeId"];
@@ -797,7 +797,7 @@ export function addCommissionToPools(options: AddCommissionToPoolsOptions) {
   const argumentsTypes = [
     `${packageAddress}::staking::Staking`,
     "vector<0x0000000000000000000000000000000000000000000000000000000000000002::object::ID>",
-    "vector<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>>",
+    `vector<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<${packageAddress}::wal::WAL>>`,
   ] satisfies string[];
   const parameterNames = ["staking", "nodeIds", "commissions"];
   return (tx: Transaction) =>
