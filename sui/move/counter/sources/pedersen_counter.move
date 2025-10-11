@@ -1,6 +1,3 @@
-// Copyright (c) Mysten Labs, Inc.
-// SPDX-License-Identifier: Apache-2.0
-
 /// Pedersen Commitment Counter using homomorphic properties
 ///
 /// This counter uses Pedersen commitments to hide the actual counter value
@@ -13,7 +10,7 @@
 /// This allows incrementing the counter without revealing the value.
 module counter::pedersen_counter;
 
-use sui::{bls12381::{Self, Scalar, G1}, group_ops::Element};
+use sui::{bls12381::{Self, G1, Scalar}, group_ops::Element};
 
 // === Structs ===
 
