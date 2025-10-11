@@ -84,6 +84,7 @@ export function usePedersenCounter() {
         package: counterPackageId,
         arguments: [bytes],
       })(tx);
+
       tx.transferObjects([counter], account.address);
 
       const result = await executeTransaction({ transaction: tx });
