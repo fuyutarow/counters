@@ -41,6 +41,12 @@ export function AppBar() {
             >
               Walrus Counter
             </Link>
+            <Link
+              href="/pedersen-counter"
+              className="font-medium text-sm transition-colors hover:text-primary"
+            >
+              Pedersen Counter
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-2">

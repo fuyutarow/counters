@@ -12,6 +12,7 @@
 
 import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { randomBytes } from "@noble/hashes/utils.js";
+import consola from "consola";
 import { Result } from "neverthrow";
 
 // Use the G1 point class directly from bls12_381
@@ -158,4 +159,52 @@ export function verifyCommitment(commitment: PedersenCommitment): boolean {
   }
 
   return true;
+}
+
+/**
+ * Open (reveal) a Pedersen commitment by verifying it matches the claimed value and blinding
+ *
+ * @param value - The claimed committed value
+ * @param blinding - The blinding factor used during commitment
+ * @param commitmentBytes - The 48-byte commitment from on-chain (as number array)
+ * @returns true if the commitment opens correctly, false otherwise
+ */
+export function openCommitment(
+  value: bigint,
+  blinding: bigint,
+  commitmentBytes: number[],
+): boolean {
+  const result = Result.fromThrowable(
+    () => {
+      // Recreate the commitment from the claimed value and blinding
+      const recreated = createCommitment(value, blinding);
+
+      // Serialize it to compare with on-chain
+      const recreatedBytes = serializeCommitment(recreated);
+
+      // Convert on-chain bytes to Uint8Array
+      const onchainBytes = new Uint8Array(commitmentBytes);
+
+      // Compare byte-by-byte
+      if (recreatedBytes.length !== onchainBytes.length) {
+        throw new Error("Commitment length mismatch");
+      }
+
+      for (let i = 0; i < recreatedBytes.length; i++) {
+        if (recreatedBytes[i] !== onchainBytes[i]) {
+          throw new Error("Commitment bytes mismatch");
+        }
+      }
+
+      return true;
+    },
+    (error) => new Error(error instanceof Error ? error.message : String(error)),
+  )();
+
+  if (result.isErr()) {
+    consola.error("[pedersen] Failed to open commitment:", result.error);
+    return false;
+  }
+
+  return result.value;
 }

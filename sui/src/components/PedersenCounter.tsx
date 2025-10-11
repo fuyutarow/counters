@@ -4,16 +4,18 @@ import { useSuiClient } from "@mysten/dapp-kit";
 import { formatAddress } from "@mysten/sui/utils";
 import { useQuery } from "@tanstack/react-query";
 import consola from "consola";
-import { Copy, ExternalLink, Loader2, Shield } from "lucide-react";
+import { Copy, ExternalLink, Eye, Loader2, Shield } from "lucide-react";
 import { ResultAsync } from "neverthrow";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { usePedersenCounter } from "@/hooks/usePedersenCounter";
+import { type OpeningResult, usePedersenOpening } from "@/hooks/usePedersenOpening";
 
 interface PedersenCounterProps {
   id: string;
@@ -22,7 +24,9 @@ interface PedersenCounterProps {
 export function PedersenCounter({ id }: PedersenCounterProps) {
   const suiClient = useSuiClient();
   const pedersenCounter = usePedersenCounter();
+  const opening = usePedersenOpening();
   const [incrementValue, setIncrementValue] = useState("1");
+  const [openResult, setOpenResult] = useState<OpeningResult | null>(null);
   const inputId = useId();
 
   // Fetch counter data
@@ -95,7 +99,26 @@ export function PedersenCounter({ id }: PedersenCounterProps) {
       return;
     }
 
+    // Clear previous opening result since commitment changed
+    setOpenResult(null);
     refetch();
+  };
+
+  const handleOpen = async () => {
+    if (!data) return;
+
+    const result = await opening.open(id, data.commitmentBytes);
+    setOpenResult(result);
+
+    if (result.success) {
+      toast.success("Commitment opened successfully!", {
+        description: `Revealed value: ${result.value}`,
+      });
+    } else {
+      toast.error("Failed to open commitment", {
+        description: result.error,
+      });
+    }
   };
 
   const copyToClipboard = (text: string) => {
@@ -268,6 +291,107 @@ export function PedersenCounter({ id }: PedersenCounterProps) {
                 <li>Result: C_new = C_old + C_increment</li>
                 <li>The actual value remains hidden throughout</li>
               </ol>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Opening (Reveal Value) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Open Commitment (Reveal Value)
+            </CardTitle>
+            <CardDescription>
+              Reveal the actual counter value using secrets stored in your browser. This verifies
+              that you created this counter.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {opening.checkHasSecrets(id) ? (
+              <>
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  onClick={handleOpen}
+                  disabled={opening.isOpening}
+                  className="w-full"
+                >
+                  {opening.isOpening ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Opening...
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="mr-2 h-4 w-4" />
+                      Open Commitment
+                    </>
+                  )}
+                </Button>
+
+                {openResult?.success && openResult.value !== undefined && (
+                  <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
+                    <AlertTitle className="text-green-900 dark:text-green-100">
+                      ✅ Commitment Opened Successfully
+                    </AlertTitle>
+                    <AlertDescription className="mt-2">
+                      <div className="space-y-2">
+                        <p className="text-muted-foreground text-sm">Revealed counter value:</p>
+                        <div className="rounded-lg border bg-background p-4">
+                          <p className="font-bold text-3xl text-green-600 dark:text-green-400">
+                            {openResult.value.toString()}
+                          </p>
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          This value was cryptographically verified against the on-chain commitment.
+                        </p>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {openResult && !openResult.success && (
+                  <Alert variant="destructive">
+                    <AlertTitle>❌ Opening Failed</AlertTitle>
+                    <AlertDescription className="text-sm">{openResult.error}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950">
+                  <p className="font-medium text-sm">ℹ️ How Opening Works</p>
+                  <ol className="mt-2 ml-4 list-decimal space-y-1 text-muted-foreground text-xs">
+                    <li>Retrieve stored value and blinding factor from localStorage</li>
+                    <li>Recreate the commitment: C = value × G + blinding × H</li>
+                    <li>Compare with on-chain commitment byte-by-byte</li>
+                    <li>If they match, the value is cryptographically proven correct</li>
+                  </ol>
+                </div>
+              </>
+            ) : (
+              <Alert variant="destructive">
+                <AlertTitle>🔒 No Secrets Available</AlertTitle>
+                <AlertDescription className="space-y-2 text-sm">
+                  <p>No secrets found for this counter in localStorage. This can happen if:</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    <li>This counter was created on a different device or browser</li>
+                    <li>Your browser&apos;s localStorage was cleared</li>
+                    <li>You&apos;re viewing someone else&apos;s counter</li>
+                  </ul>
+                  <p className="mt-2 font-semibold">
+                    💡 Only the creator can reveal the value of a Pedersen counter.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+              <p className="font-medium text-sm">⚠️ Security Notice</p>
+              <p className="mt-1 text-muted-foreground text-xs">
+                Secrets are stored in plaintext in your browser&apos;s localStorage. They are not
+                encrypted and will be permanently lost if localStorage is cleared. Consider
+                exporting your secrets for backup if you need long-term access.
+              </p>
             </div>
           </CardContent>
         </Card>
