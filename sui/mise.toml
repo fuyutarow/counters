@@ -99,7 +99,7 @@ depends = ["clean:ui", "clean:move"]
 [tasks.install]
 description = "全依存関係のインストール"
 alias = "i"
-run = "npm install"
+depends = ["install:ui"]
 
 [tasks.up]
 description = "依存関係を最新バージョンに更新"
@@ -113,7 +113,7 @@ echo "📦 package.jsonを最新バージョンに更新中..."
 bunx npm-check-updates -u
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-npm install
+{{mise_bin}} install:ui
 echo "✅ 依存関係を最新バージョンに更新完了！"
 '''
 
@@ -201,6 +201,10 @@ run = "bun test --watch"
 # ===============================================
 # 🌐 アトミック UIタスク
 # ===============================================
+
+[tasks."install:ui"]
+description = "UI依存関係のみインストール"
+run = '''npm install'''
 
 [tasks."build:ui"]
 description = "UIのみビルド"
@@ -538,4 +542,3 @@ run = '''
 set -euo pipefail
 bash scripts/build-wasm.sh
 '''
-

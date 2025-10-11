@@ -18,7 +18,13 @@ gas_budget = "100000000"
 [tasks.dev]
 description = "開発環境の完全セットアップ"
 alias = "d"
-depends = ["localnode:start", "localnode:wait", "wallet:setup", "deploy", "ui:dev"]
+depends = [
+    "localnode:start",
+    "localnode:wait",
+    "wallet:setup",
+    "deploy",
+    "ui:dev",
+]
 
 [tasks.build]
 description = "全プログラムのビルド"
@@ -52,7 +58,7 @@ depends = ["clean:target", "clean:ledger"]
 [tasks.install]
 description = "全依存関係のインストール"
 alias = "i"
-depends = ["ui:install", "install:solana", "install:anchor"]
+depends = ["install:ui", "install:solana", "install:anchor"]
 
 [tasks."install-cli"]
 description = "Solana & Anchor CLIのインストール"
@@ -71,7 +77,7 @@ echo "📦 package.jsonを最新バージョンに更新中..."
 bunx npm-check-updates -u
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-bun install
+{{mise_bin}} install:ui
 echo "✅ 依存関係を最新バージョンに更新完了！"
 '''
 
@@ -436,15 +442,10 @@ echo "   shared_counter: $(solana address -k target/deploy/shared_counter-keypai
 # 🌐 アトミック フロントエンドタスク
 # ===============================================
 
-[tasks."ui:install"]
+
+[tasks."install:ui"]
 description = "UI依存関係のみインストール"
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-echo "📦 フロントエンド依存関係インストール中..."
-bun install
-echo "✅ 依存関係インストール完了"
-'''
+run = '''npm install'''
 
 [tasks."ui:dev"]
 description = "UI開発サーバーのみ起動"
