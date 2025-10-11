@@ -49,8 +49,9 @@ export function createCommitment(value: bigint, blinding?: bigint): PedersenComm
   const normalizedBlinding = r % frOrder;
 
   // C = value * G + r * H
-  const valuePoint = G.multiply(normalizedValue);
-  const blindingPoint = H.multiply(normalizedBlinding);
+  // Handle zero case: multiply() doesn't accept 0, so use ZERO point
+  const valuePoint = normalizedValue === 0n ? G1Point.ZERO : G.multiply(normalizedValue);
+  const blindingPoint = normalizedBlinding === 0n ? G1Point.ZERO : H.multiply(normalizedBlinding);
   const point = valuePoint.add(blindingPoint);
 
   return {
