@@ -12,6 +12,7 @@
 
 import { bls12_381 } from "@noble/curves/bls12-381.js";
 import { randomBytes } from "@noble/hashes/utils.js";
+import { Result } from "neverthrow";
 
 // Use the G1 point class directly from bls12_381
 const G1Point = bls12_381.G1.Point;
@@ -141,18 +142,20 @@ export function createSerializedCommitment(value: bigint, blinding?: bigint) {
  * @returns true if valid
  */
 export function verifyCommitment(commitment: PedersenCommitment): boolean {
-  // eslint-disable-next-line no-restricted-syntax
-  try {
-    // Check if point is on curve
-    commitment.point.assertValidity();
+  // Check if point is on curve using neverthrow
+  const validityResult = Result.fromThrowable(
+    () => commitment.point.assertValidity(),
+    () => new Error("Point is not on curve"),
+  )();
 
-    // Check if point is not the identity element
-    if (commitment.point.equals(G1Point.ZERO)) {
-      return false;
-    }
-
-    return true;
-  } catch {
+  if (validityResult.isErr()) {
     return false;
   }
+
+  // Check if point is not the identity element
+  if (commitment.point.equals(G1Point.ZERO)) {
+    return false;
+  }
+
+  return true;
 }

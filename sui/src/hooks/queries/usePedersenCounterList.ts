@@ -10,7 +10,10 @@ const PedersenCounterSchema = z.object({
     id: z.string(),
   }),
   commitment: z.object({
-    bytes: z.array(z.number()),
+    type: z.string(),
+    fields: z.object({
+      bytes: z.array(z.number()),
+    }),
   }),
 });
 
@@ -81,7 +84,7 @@ export function usePedersenCounterList() {
 
         counters.push({
           id: objectId,
-          commitmentBytes: parseResult.data.commitment.bytes,
+          commitmentBytes: parseResult.data.commitment.fields.bytes,
           version,
         });
       }
