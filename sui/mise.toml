@@ -379,6 +379,94 @@ echo "  1. mise run gen    # ABI定義の更新"
 echo "  2. mise run dev    # 開発サーバー再起動"
 '''
 
+[tasks."sui:upgrade"]
+description = "Moveコントラクトのアップグレード"
+alias = ["su", "upgrade"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+PACKAGE="${1:-counter}"
+NETWORK="${2:-testnet}"
+
+echo "🔄 $PACKAGE を $NETWORK でアップグレード中..."
+echo ""
+
+# Published.toml から upgrade-capability を読み取る
+PUBLISHED_TOML="move/$PACKAGE/Published.toml"
+if [ ! -f "$PUBLISHED_TOML" ]; then
+    echo "❌ エラー: $PUBLISHED_TOML が見つかりません"
+    echo "   パッケージが既にパブリッシュされているか確認してください"
+    exit 1
+fi
+
+UPGRADE_CAP=$(grep "^upgrade-capability" "$PUBLISHED_TOML" | sed 's/.*= "\(.*\)"/\1/')
+if [ -z "$UPGRADE_CAP" ]; then
+    echo "❌ エラー: upgrade-capability が見つかりません"
+    exit 1
+fi
+
+echo "📋 アップグレード情報:"
+echo "   パッケージ: $PACKAGE"
+echo "   ネットワーク: $NETWORK"
+echo "   UpgradeCap: $UPGRADE_CAP"
+echo ""
+
+# ネットワーク切り替え
+mise run sui:env $NETWORK
+
+# ビルド実行
+echo "🔨 パッケージビルド中..."
+cd move/$PACKAGE
+sui move build
+echo ""
+
+# アップグレード実行
+echo "🚀 アップグレード実行中..."
+sui client upgrade \
+    --gas-budget {{vars.gas_budget}} \
+    --upgrade-capability "$UPGRADE_CAP"
+
+echo ""
+echo "✅ アップグレード完了！"
+echo ""
+echo "🔄 次の手順:"
+echo "  1. mise run gen $PACKAGE    # ABI定義の更新"
+echo "  2. mise run dev              # 開発サーバー再起動"
+'''
+
+[tasks."sui:upgrade-info"]
+description = "パッケージのアップグレード情報を表示"
+alias = ["sui-info", "info"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+PACKAGE="${1:-counter}"
+
+PUBLISHED_TOML="move/$PACKAGE/Published.toml"
+if [ ! -f "$PUBLISHED_TOML" ]; then
+    echo "❌ エラー: $PUBLISHED_TOML が見つかりません"
+    echo "   パッケージがまだパブリッシュされていません"
+    exit 1
+fi
+
+echo "📋 $PACKAGE のアップグレード情報:"
+echo ""
+cat "$PUBLISHED_TOML"
+echo ""
+
+UPGRADE_CAP=$(grep "^upgrade-capability" "$PUBLISHED_TOML" | sed 's/.*= "\(.*\)"/\1/')
+PUBLISHED_AT=$(grep "^published-at" "$PUBLISHED_TOML" | sed 's/.*= "\(.*\)"/\1/')
+VERSION=$(grep "^version" "$PUBLISHED_TOML" | head -1 | sed 's/.*= \(.*\)/\1/')
+
+echo "🔑 キー情報:"
+echo "   現在のバージョン: $VERSION"
+echo "   Published At: $PUBLISHED_AT"
+echo "   UpgradeCap: $UPGRADE_CAP"
+echo ""
+echo "💡 アップグレードコマンド:"
+echo "   mise run sui:upgrade $PACKAGE [network]"
+'''
+
 [tasks."move:test"]
 description = "Moveコントラクトのテスト実行"
 alias = ["mt", "test:move"]
