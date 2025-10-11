@@ -87,7 +87,7 @@ echo "📦 package.jsonを最新バージョンに更新中..."
 bunx npm-check-updates -u
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-bun install
+{{mise_bin}} install:ui
 echo "✅ 依存関係を最新バージョンに更新完了！"
 '''
 
@@ -99,8 +99,7 @@ depends = ["clean:ui", "clean:contracts"]
 [tasks.install]
 description = "全依存関係のインストール"
 alias = "i"
-run = "bun install"
-
+depends = ["install:ui"]
 
 # ===============================================
 # 📋 ユーティリティ・管理タスク
@@ -179,6 +178,10 @@ run = "cd contracts && forge test"
 # ===============================================
 # 🌐 アトミック UIタスク
 # ===============================================
+
+[tasks."install:ui"]
+description = "UI依存関係のみインストール"
+run = '''npm install'''
 
 [tasks."build:ui"]
 description = "UIのみビルド"
@@ -320,4 +323,3 @@ anvil
 description = "Forge成果物からTypeScript ABIのみ生成"
 alias = ["gen-abi", "abigen"]
 run = "forge build && bun @wagmi/cli generate"
-
