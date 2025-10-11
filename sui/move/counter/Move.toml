@@ -1,7 +1,8 @@
 [package]
 name = "Counter"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
+published-at = "0x6aa35f5f737f106c867d45cb02e39c61cbd5359088a929d161363bd34f62fd8a"
 
 [dependencies]
 Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }

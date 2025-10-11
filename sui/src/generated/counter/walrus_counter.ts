@@ -25,9 +25,7 @@ export interface NewOptions {
 }
 export function _new(options: NewOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
-  const argumentsTypes = [
-    "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
-  ] satisfies string[];
+  const argumentsTypes = [`${packageAddress}::blob::Blob`] satisfies string[];
   const parameterNames = ["blob"];
   return (tx: Transaction) =>
     tx.moveCall({
@@ -51,7 +49,7 @@ export function replace(options: ReplaceOptions) {
   const packageAddress = options.package ?? "@local-pkg/counter";
   const argumentsTypes = [
     `${packageAddress}::walrus_counter::WalrusCounter`,
-    "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+    `${packageAddress}::blob::Blob`,
   ] satisfies string[];
   const parameterNames = ["self", "newBlob"];
   return (tx: Transaction) =>
