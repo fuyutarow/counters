@@ -137,7 +137,7 @@ export function reserveSpace(options: ReserveSpaceOptions) {
     `${packageAddress}::system::System`,
     "u64",
     "u32",
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
   ] satisfies string[];
   const parameterNames = ["self", "storageAmount", "epochsAhead", "payment"];
   return (tx: Transaction) =>
@@ -181,7 +181,7 @@ export function reserveSpaceForEpochs(options: ReserveSpaceForEpochsOptions) {
     "u64",
     "u32",
     "u32",
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
   ] satisfies string[];
   const parameterNames = ["self", "storageAmount", "startEpoch", "endEpoch", "payment"];
   return (tx: Transaction) =>
@@ -231,7 +231,7 @@ export function registerBlob(options: RegisterBlobOptions) {
     "u64",
     "u8",
     "bool",
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
   ] satisfies string[];
   const parameterNames = [
     "self",
@@ -381,7 +381,7 @@ export function extendBlob(options: ExtendBlobOptions) {
     `${packageAddress}::system::System`,
     `${packageAddress}::blob::Blob`,
     "u32",
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
   ] satisfies string[];
   const parameterNames = ["self", "blob", "extendedEpochs", "payment"];
   return (tx: Transaction) =>
@@ -416,7 +416,7 @@ export function addSubsidy(options: AddSubsidyOptions) {
   const packageAddress = options.package ?? "Walrus";
   const argumentsTypes = [
     `${packageAddress}::system::System`,
-    "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>",
+    `0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<${packageAddress}::wal::WAL>`,
     "u32",
   ] satisfies string[];
   const parameterNames = ["system", "subsidy", "epochsAhead"];
@@ -446,7 +446,7 @@ export function addPerEpochSubsidies(options: AddPerEpochSubsidiesOptions) {
   const packageAddress = options.package ?? "Walrus";
   const argumentsTypes = [
     `${packageAddress}::system::System`,
-    "vector<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL>>",
+    `vector<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<${packageAddress}::wal::WAL>>`,
   ] satisfies string[];
   const parameterNames = ["system", "subsidies"];
   return (tx: Transaction) =>
