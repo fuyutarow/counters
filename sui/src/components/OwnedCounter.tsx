@@ -7,6 +7,7 @@ import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
 import * as ownedCounter from "@/generated/counter/owned_counter";
 import { useCounter, useCounterValue } from "@/hooks/useCounter";
+import { usePreallocatedTransaction } from "@/hooks/usePreallocatedTransaction";
 import { useSponsoredTransaction } from "@/hooks/useSponsoredTransaction";
 import { useNetworkVariable } from "@/networkConfig";
 
@@ -21,8 +22,15 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
   // Type-safe data fetching for owned counters only
   const { data, isLoading, error, refetch } = useCounterValue(id);
 
-  // Sponsored transaction hook
+  // Enoki sponsored transaction hook
   const sponsoredTx = useSponsoredTransaction({
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
+  // Pre-allocated 1RT transaction hook
+  const preallocTx = usePreallocatedTransaction({
     onSuccess: () => {
       refetch();
     },
@@ -31,6 +39,7 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
   // Owned counter operations
   const isIncrementing = counter.owned.isPending.increment;
   const isSponsoredIncrementing = sponsoredTx.isPending;
+  const isPreallocIncrementing = preallocTx.isPending;
   const isSettingValue = counter.owned.isPending.setValue;
 
   const handleIncrement = async () => {
@@ -45,6 +54,15 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
       arguments: [tx.object(id)],
     })(tx);
     await sponsoredTx.mutateAsync(tx);
+  };
+
+  const handleIncrementPrealloc = async () => {
+    const tx = new Transaction();
+    ownedCounter.increment({
+      package: counterPackageId,
+      arguments: [tx.object(id)],
+    })(tx);
+    await preallocTx.mutateAsync(tx);
   };
 
   const handleSetValue = async (value: number) => {
@@ -92,11 +110,14 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
       isLoading={isLoading}
       isIncrementing={isIncrementing}
       isSponsoredIncrementing={isSponsoredIncrementing}
+      isPreallocIncrementing={isPreallocIncrementing}
       isSettingValue={isSettingValue}
       onIncrement={handleIncrement}
       onIncrementSponsored={handleIncrementSponsored}
+      onIncrementPrealloc={handleIncrementPrealloc}
       onSetValue={handleSetValue}
       error={error}
+      hasAllocation={preallocTx.hasAllocation}
     />
   );
 }

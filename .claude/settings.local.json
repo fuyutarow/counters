@@ -14,7 +14,8 @@
       "Bash(sui client addresses:*)",
       "Bash(sui keytool export:*)",
       "Bash(sui client balance:*)",
-      "Bash(sui client faucet:*)"
+      "Bash(sui client faucet:*)",
+      "Bash(bun run check:*)"
     ],
     "deny": [],
     "ask": []
