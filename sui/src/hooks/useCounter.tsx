@@ -10,6 +10,7 @@ import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import consola from "consola";
 import * as ownedCounter from "@/generated/counter/owned_counter";
 import * as sharedCounter from "@/generated/counter/shared_counter";
 import { useNetworkVariable } from "@/networkConfig";
@@ -143,21 +144,51 @@ export function useCounter() {
   const incrementOwnedCounter = useMutation({
     mutationKey: ["counter", "owned", "increment"],
     mutationFn: async (counterId: string): Promise<void> => {
+      const totalStart = performance.now();
+
+      // Step 1: Build transaction
+      const buildStart = performance.now();
       const tx = new Transaction();
       ownedCounter.increment({
         package: counterPackageId,
         arguments: [tx.object(counterId)],
       })(tx);
+      const buildTime = performance.now() - buildStart;
 
+      // Step 2: Sign & Execute (includes user approval wait)
+      const executeStart = performance.now();
       const result = await executeTransaction({ transaction: tx });
+      const executeTime = performance.now() - executeStart;
 
-      showTxSuccessToast("Counter incremented successfully!", result.digest);
+      // Step 3: Invalidate queries
+      const invalidateStart = performance.now();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["counter", counterId] }),
         queryClient.invalidateQueries({ queryKey: ["owned-counters"] }),
       ]);
+      const invalidateTime = performance.now() - invalidateStart;
+
+      const totalTime = performance.now() - totalStart;
+      const systemTime = buildTime + invalidateTime; // Sign&Executeはユーザー操作含むので除外
+
+      consola.box(
+        `┌─ Normal Transaction ─────────────────────────┐
+│                                              │
+│  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
+│  2. Sign+Execute:       ${executeTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  3. Invalidate:         ${invalidateTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:      ${systemTime.toFixed(0).padStart(5)}ms            │
+│  (excludes user approval wait)               │
+└──────────────────────────────────────────────┘`,
+      );
+
+      showTxSuccessToast("Counter incremented successfully!", result.digest);
     },
     onError: (error) => {
+      consola.error(`[Normal] Error: ${error.message}`);
       toast.error("Failed to increment counter", {
         description: error.message,
       });
@@ -217,21 +248,51 @@ export function useCounter() {
   const incrementSharedCounter = useMutation({
     mutationKey: ["counter", "shared", "increment"],
     mutationFn: async (counterId: string): Promise<void> => {
+      const totalStart = performance.now();
+
+      // Step 1: Build transaction
+      const buildStart = performance.now();
       const tx = new Transaction();
       sharedCounter.increment({
         package: counterPackageId,
         arguments: [tx.object(counterId)],
       })(tx);
+      const buildTime = performance.now() - buildStart;
 
+      // Step 2: Sign & Execute (includes user approval wait)
+      const executeStart = performance.now();
       const result = await executeTransaction({ transaction: tx });
+      const executeTime = performance.now() - executeStart;
 
-      showTxSuccessToast("Shared counter incremented successfully!", result.digest);
+      // Step 3: Invalidate queries
+      const invalidateStart = performance.now();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["counter", counterId] }),
         queryClient.invalidateQueries({ queryKey: ["shared-counters"] }),
       ]);
+      const invalidateTime = performance.now() - invalidateStart;
+
+      const totalTime = performance.now() - totalStart;
+      const systemTime = buildTime + invalidateTime; // Sign&Executeはユーザー操作含むので除外
+
+      consola.box(
+        `┌─ Normal Transaction (Shared) ────────────────┐
+│                                              │
+│  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
+│  2. Sign+Execute:       ${executeTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  3. Invalidate:         ${invalidateTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:      ${systemTime.toFixed(0).padStart(5)}ms            │
+│  (excludes user approval wait)               │
+└──────────────────────────────────────────────┘`,
+      );
+
+      showTxSuccessToast("Shared counter incremented successfully!", result.digest);
     },
     onError: (error) => {
+      consola.error(`[Normal Shared] Error: ${error.message}`);
       toast.error("Failed to increment shared counter", {
         description: error.message,
       });

@@ -143,16 +143,22 @@ export function useSponsoredTransaction(
       }
 
       const totalTime = performance.now() - totalStart;
-      consola.success(`[Sponsored] Total time: ${totalTime.toFixed(0)}ms`);
+      const systemTime = buildTime + sponsorTime + executeTime + waitTime; // signTimeはユーザー操作含むので除外
+
       consola.box(
-        `Sponsored Transaction Breakdown:\n` +
-          `  1. Build:      ${buildTime.toFixed(0)}ms\n` +
-          `  2. Sponsor:    ${sponsorTime.toFixed(0)}ms\n` +
-          `  3. Sign:       ${signTime.toFixed(0)}ms\n` +
-          `  4. Execute:    ${executeTime.toFixed(0)}ms\n` +
-          `  5. Wait:       ${waitTime.toFixed(0)}ms\n` +
-          `  ─────────────────────\n` +
-          `  Total:         ${totalTime.toFixed(0)}ms`,
+        `┌─ Sponsored Transaction ──────────────────────┐
+│                                              │
+│  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
+│  2. Sponsor (POST):     ${sponsorTime.toFixed(0).padStart(5)}ms            │
+│  3. Sign:               ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  4. Execute (PUT):      ${executeTime.toFixed(0).padStart(5)}ms            │
+│  5. Wait for tx:        ${waitTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:      ${systemTime.toFixed(0).padStart(5)}ms            │
+│  (excludes user approval wait)               │
+└──────────────────────────────────────────────┘`,
       );
 
       return result;
