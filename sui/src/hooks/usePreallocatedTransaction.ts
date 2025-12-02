@@ -59,6 +59,17 @@ export function usePreallocatedTransaction(
         throw new Error("No coin allocated. Call allocate() first.");
       }
 
+      if (!allocation.sponsor) {
+        throw new Error("Allocation missing sponsor address. Please re-allocate.");
+      }
+
+      // Verify sender and gasOwner are different
+      if (account.address === allocation.sponsor) {
+        throw new Error(
+          "Sender and gasOwner cannot be the same address for sponsored transactions.",
+        );
+      }
+
       const signFeature = currentWallet?.features["sui:signTransaction"];
       if (!signFeature) {
         throw new Error("Current wallet cannot sign transactions");
@@ -82,6 +93,14 @@ export function usePreallocatedTransaction(
           digest: allocation.digest,
         },
       ]);
+
+      // Debug: Log sender and gasOwner
+      consola.info("[Prealloc] Transaction config", {
+        sender: account.address,
+        gasOwner: allocation.sponsor,
+        coinId: allocation.coinId,
+        isSameAddress: account.address === allocation.sponsor,
+      });
 
       const txBytes = await transaction.build({ client });
       const buildTime = performance.now() - buildStart;

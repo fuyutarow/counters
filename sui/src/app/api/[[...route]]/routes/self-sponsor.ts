@@ -274,6 +274,12 @@ export const selfSponsorRoutes = new Hono()
       return c.json({ error: "No allocated coin found" }, 404);
     }
 
+    const keypairResult = getSponsorKeypair();
+    if (keypairResult.isErr()) {
+      return c.json({ error: keypairResult.error.message }, 500);
+    }
+    const sponsor = keypairResult.value.toSuiAddress();
+
     const suiClient = getSuiClient(network);
 
     // Get fresh coin state
@@ -303,6 +309,7 @@ export const selfSponsorRoutes = new Hono()
       coinId: allocation.coinId,
       version,
       digest,
+      sponsor,
       network,
     });
   })
@@ -347,12 +354,22 @@ export const selfSponsorRoutes = new Hono()
     }
 
     const sponsorKeypair = keypairResult.value;
+    const sponsorAddress = sponsorKeypair.toSuiAddress();
     const suiClient = getSuiClient(network);
+
+    const totalStart = performance.now();
 
     // Decode transaction bytes
     const txBytesBuffer = Buffer.from(txBytes, "base64");
 
-    // Sign with sponsor keypair
+    consola.info("[Self-Sponsor] Execute pre-allocated transaction", {
+      userAddress,
+      sponsorAddress,
+      txBytesLength: txBytesBuffer.length,
+    });
+
+    // Step 1: Sign with sponsor keypair
+    const signStart = performance.now();
     const signResult = await ResultAsync.fromPromise(
       sponsorKeypair.signTransaction(txBytesBuffer),
       (e) => (e instanceof Error ? e : new Error("Failed to sign transaction")),
@@ -364,18 +381,19 @@ export const selfSponsorRoutes = new Hono()
       });
       return c.json({ error: signResult.error.message }, 500);
     }
+    const signTime = performance.now() - signStart;
+    consola.info(`[Self-Sponsor] 1. Sign tx: ${signTime.toFixed(0)}ms`);
 
     const sponsorSignature = signResult.value.signature;
 
-    // Execute with both signatures (1RT - single API call!)
+    // Step 2: Execute with both signatures (1RT - single API call!)
+    const executeStart = performance.now();
     const executeResult = await ResultAsync.fromPromise(
       suiClient.executeTransactionBlock({
         transactionBlock: txBytes,
         signature: [userSignature, sponsorSignature],
         options: {
           showEffects: true,
-          showObjectChanges: true,
-          showEvents: true,
         },
         requestType: "WaitForLocalExecution",
       }),
@@ -394,36 +412,31 @@ export const selfSponsorRoutes = new Hono()
       });
       return c.json({ error: errorMsg }, 500);
     }
+    const executeTime = performance.now() - executeStart;
+    consola.info(`[Self-Sponsor] 2. Execute tx: ${executeTime.toFixed(0)}ms`);
 
-    // Wait for finalization
-    const waitResult = await ResultAsync.fromPromise(
-      suiClient.waitForTransaction({
-        digest: executeResult.value.digest,
-        options: {
-          showEffects: true,
-          showObjectChanges: true,
-          showEvents: true,
-        },
-      }),
-      (e) => (e instanceof Error ? e : new Error("Failed to wait for transaction")),
+    const totalTime = performance.now() - totalStart;
+
+    consola.box(
+      `┌─ Self-Sponsor Backend (1RT) ─────────────────┐
+│                                              │
+│  1. Sign (sponsor):         ${signTime.toFixed(0).padStart(5)}ms            │
+│  2. Execute (Sui RPC):      ${executeTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total backend time:        ${totalTime.toFixed(0).padStart(5)}ms            │
+└──────────────────────────────────────────────┘`,
     );
 
-    if (waitResult.isErr()) {
-      consola.error("[Self-Sponsor] Failed to wait for pre-allocated transaction", {
-        error: waitResult.error.message,
-      });
-      return c.json({ error: waitResult.error.message }, 500);
-    }
-
     consola.success("[Self-Sponsor] Pre-allocated transaction executed (1RT)", {
-      digest: waitResult.value.digest,
-      success: waitResult.value.effects?.status?.status === "success",
+      digest: executeResult.value.digest,
+      success: executeResult.value.effects?.status?.status === "success",
       userAddress,
     });
 
     return c.json({
-      digest: waitResult.value.digest,
-      success: waitResult.value.effects?.status?.status === "success",
+      digest: executeResult.value.digest,
+      success: executeResult.value.effects?.status?.status === "success",
     });
   })
   // GET /api/tx/self/balance - Check sponsor balance
