@@ -2,12 +2,23 @@
 const nextConfig = {
   // 🚨 開発サーバー時のみ.next-devを使用（ビルドとの競合回避）
   distDir: process.env.NEXT_DEV_SERVER === "true" ? ".next-dev" : ".next",
+  // Cloudflare Workers (OpenNext) 用のstandalone出力
+  output: "standalone",
   experimental: {
     optimizePackageImports: ["@mysten/dapp-kit"],
   },
   transpilePackages: ["@mysten/dapp-kit"],
-  webpack: (config, { isServer, nextRuntime }) => {
-    config.externals.push("pino-pretty", "lokijs", "encoding");
+  // Next.js 15: Server Components bundlingから除外するパッケージ
+  serverExternalPackages: ["pino-pretty", "lokijs", "encoding"],
+  // ウォレットアイコン用の外部画像ドメイン
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "cdn.martianwallet.xyz" },
+      { protocol: "https", hostname: "**.suiet.app" },
+      { protocol: "https", hostname: "**.slush.app" },
+    ],
+  },
+  webpack: (config, { nextRuntime }) => {
 
     // Skip WASM handling for edge runtime
     if (nextRuntime === 'edge') {

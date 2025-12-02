@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
   "linter": {
     "enabled": true,
     "rules": {
@@ -29,7 +29,10 @@
       "suspicious": {
         "noExplicitAny": "error",
         "noImplicitAnyLet": "error",
-        "noConsole": "error"
+        "noConsole": {
+          "level": "error",
+          "fix": "none"
+        }
       },
       "complexity": {
         "noBannedTypes": "error",
@@ -119,5 +122,24 @@
       "!**/.next-dev",
       "!src/graphql/generated.ts"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/generated/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off",
+            "noImplicitAnyLet": "off"
+          },
+          "complexity": {
+            "noBannedTypes": "off"
+          }
+        }
+      }
+    }
+  ]
 }

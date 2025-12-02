@@ -1,10 +1,15 @@
 "use client";
 
+import { Transaction } from "@mysten/sui/transactions";
 import { formatAddress } from "@mysten/sui/utils";
 import { ExternalLink } from "lucide-react";
 import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
+import * as ownedCounter from "@/generated/counter/owned_counter";
 import { useCounter, useCounterValue } from "@/hooks/useCounter";
+import { usePreallocatedTransaction } from "@/hooks/usePreallocatedTransaction";
+import { useSponsoredTransaction } from "@/hooks/useSponsoredTransaction";
+import { useNetworkVariable } from "@/networkConfig";
 
 interface OwnedCounterProps {
   id: string;
@@ -12,17 +17,52 @@ interface OwnedCounterProps {
 
 export function OwnedCounter({ id }: OwnedCounterProps) {
   const counter = useCounter();
+  const counterPackageId = useNetworkVariable("counterPackageId");
 
   // Type-safe data fetching for owned counters only
   const { data, isLoading, error, refetch } = useCounterValue(id);
 
+  // Enoki sponsored transaction hook
+  const sponsoredTx = useSponsoredTransaction({
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
+  // Pre-allocated 1RT transaction hook
+  const preallocTx = usePreallocatedTransaction({
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
   // Owned counter operations
   const isIncrementing = counter.owned.isPending.increment;
+  const isSponsoredIncrementing = sponsoredTx.isPending;
+  const isPreallocIncrementing = preallocTx.isPending;
   const isSettingValue = counter.owned.isPending.setValue;
 
   const handleIncrement = async () => {
     await counter.owned.increment(id);
     refetch();
+  };
+
+  const handleIncrementSponsored = async () => {
+    const tx = new Transaction();
+    ownedCounter.increment({
+      package: counterPackageId,
+      arguments: [tx.object(id)],
+    })(tx);
+    await sponsoredTx.mutateAsync(tx);
+  };
+
+  const handleIncrementPrealloc = async () => {
+    const tx = new Transaction();
+    ownedCounter.increment({
+      package: counterPackageId,
+      arguments: [tx.object(id)],
+    })(tx);
+    await preallocTx.mutateAsync(tx);
   };
 
   const handleSetValue = async (value: number) => {
@@ -69,10 +109,15 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
       value={data?.value ?? ""}
       isLoading={isLoading}
       isIncrementing={isIncrementing}
+      isSponsoredIncrementing={isSponsoredIncrementing}
+      isPreallocIncrementing={isPreallocIncrementing}
       isSettingValue={isSettingValue}
       onIncrement={handleIncrement}
+      onIncrementSponsored={handleIncrementSponsored}
+      onIncrementPrealloc={handleIncrementPrealloc}
       onSetValue={handleSetValue}
       error={error}
+      hasAllocation={preallocTx.hasAllocation}
     />
   );
 }

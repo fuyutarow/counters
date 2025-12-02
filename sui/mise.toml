@@ -103,6 +103,7 @@ depends = ["install:ui"]
 
 [tasks.up]
 description = "依存関係を最新バージョンに更新"
+alias = "u"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -110,11 +111,13 @@ echo "📦 古いパッケージをチェック中..."
 bun outdated
 echo ""
 echo "📦 package.jsonを最新バージョンに更新中..."
-bunx npm-check-updates -u
+bunx npm-check-updates -u --reject next
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-{{mise_bin}} install:ui
+bun install
 echo "✅ 依存関係を最新バージョンに更新完了！"
+echo "ℹ️  next は自動更新から除外されています"
+bunx @biomejs/biome migrate --write
 '''
 
 # ===============================================
@@ -204,7 +207,7 @@ run = "bun test --watch"
 
 [tasks."install:ui"]
 description = "UI依存関係のみインストール"
-run = '''npm install'''
+run = '''bun install'''
 
 [tasks."build:ui"]
 description = "UIのみビルド"
@@ -541,4 +544,52 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 bash scripts/build-wasm.sh
+'''
+
+# ===============================================
+# 🚢 Cloudflare Workers / OpenNext デプロイタスク
+# ===============================================
+
+[tasks."cf:login"]
+description = "Cloudflare Wrangler でログイン"
+alias = "cfl"
+run = "bunx wrangler login"
+
+[tasks."cf:whoami"]
+description = "現在のCloudflareアカウント確認"
+alias = "cfw"
+run = "bunx wrangler whoami"
+
+[tasks."workers:build"]
+description = "OpenNext Cloudflare ビルド (.open-next 生成)"
+alias = "wb"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🏗️ Next.js ビルド中..."
+bun run build
+echo ""
+echo "🏗️ OpenNext Cloudflare アダプター実行中..."
+bunx opennextjs-cloudflare build --skipBuild
+echo "✅ OpenNext ビルド完了: .open-next/"
+'''
+
+[tasks."workers:dev"]
+description = "Cloudflare Workers 環境でローカルプレビュー（ビルド込み）"
+alias = "wd"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🔍 Workers 環境でプレビュー起動中..."
+bunx wrangler dev
+'''
+
+[tasks."workers:preview"]
+description = "Cloudflare Workers 環境でリモートプレビュー（本番に近い環境）"
+alias = "wp"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🔍 Workers 環境でリモートプレビュー起動中..."
+bunx wrangler dev --remote
 '''

@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sui-counters",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  // Static assets binding (required for Next.js)
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+  // Observability
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+  // Server-side secrets - Set via CLI or Cloudflare Dashboard:
+  //   wrangler secret put SPONSOR_PRIVATE_KEY
+  //   wrangler secret put ENOKI_SECRET_KEY
+}

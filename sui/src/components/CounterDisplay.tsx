@@ -1,7 +1,7 @@
 "use client";
 
 import { formatAddress } from "@mysten/sui/utils";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Zap } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,10 +13,16 @@ interface CounterDisplayProps {
   value: string;
   isLoading: boolean;
   isIncrementing: boolean;
+  isSponsoredIncrementing?: boolean;
+  isPreallocIncrementing?: boolean;
   isSettingValue: boolean;
   onIncrement: () => void;
+  onIncrementSponsored?: () => void;
+  onIncrementPrealloc?: () => void;
   onSetValue: (value: number) => void;
   error?: Error | null;
+  // Prealloc: true if gas coin is allocated (via AppBar)
+  hasAllocation?: boolean;
 }
 
 export function CounterDisplay({
@@ -25,10 +31,15 @@ export function CounterDisplay({
   value,
   isLoading,
   isIncrementing,
+  isSponsoredIncrementing = false,
+  isPreallocIncrementing = false,
   isSettingValue,
   onIncrement,
+  onIncrementSponsored,
+  onIncrementPrealloc,
   onSetValue,
   error,
+  hasAllocation = false,
 }: CounterDisplayProps) {
   const [customValue, setCustomValue] = useState("");
 
@@ -108,12 +119,51 @@ export function CounterDisplay({
 
           <Button
             onClick={onIncrement}
-            disabled={isIncrementing || isLoading}
+            disabled={isIncrementing || isSponsoredIncrementing || isLoading}
             className="w-full"
             size="lg"
           >
             {isIncrementing ? "Incrementing..." : "Increment"}
           </Button>
+
+          {onIncrementSponsored && (
+            <Button
+              onClick={onIncrementSponsored}
+              disabled={isIncrementing || isSponsoredIncrementing || isLoading}
+              variant="outline"
+              className="w-full border-yellow-500 text-yellow-600 hover:bg-yellow-50"
+              size="lg"
+            >
+              {isSponsoredIncrementing ? (
+                "Incrementing..."
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Increment with Enoki (Gas-free)
+                </>
+              )}
+            </Button>
+          )}
+
+          {onIncrementPrealloc && (
+            <Button
+              onClick={onIncrementPrealloc}
+              disabled={!hasAllocation || isIncrementing || isPreallocIncrementing || isLoading}
+              variant="outline"
+              className="w-full border-green-500 text-green-600 hover:bg-green-50 disabled:opacity-50"
+              size="lg"
+              title={!hasAllocation ? "Allocate gas coin first (via AppBar)" : undefined}
+            >
+              {isPreallocIncrementing ? (
+                "Incrementing..."
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Increment with 1RT {!hasAllocation && "(Need Allocation)"}
+                </>
+              )}
+            </Button>
+          )}
 
           <div className="space-y-2">
             <Input

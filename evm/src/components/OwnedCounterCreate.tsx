@@ -16,14 +16,16 @@ export function OwnedCounterCreate() {
   const { mint, isPending } = counter.owned;
 
   const handleCreateCounter = async () => {
-    try {
-      const result = await mint();
-      toast.success("Owned counter created successfully!");
-      // 新しいカウンターページに遷移
-      router.push(`/owned-counter/${result.counterId}`);
-    } catch {
-      toast.error("Failed to create counter");
-    }
+    const result = await mint();
+    result.match(
+      (data) => {
+        toast.success("Owned counter created successfully!");
+        router.push(`/owned-counter/${data.counterId}`);
+      },
+      () => {
+        toast.error("Failed to create counter");
+      },
+    );
   };
 
   if (!isConnected) {

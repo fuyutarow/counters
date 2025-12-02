@@ -14,11 +14,10 @@ export function SharedCounterCreate() {
 
   const isCreating = counter.shared.isPending.create;
 
-  const handleCreate = async () => {
-    try {
-      const counterId = await counter.shared.create();
+  const handleCreate = () => {
+    counter.shared.create().then((counterId) => {
       router.push(`/shared-counter/${counterId}`);
-    } catch (_error) {}
+    });
   };
 
   if (!isConnected) {

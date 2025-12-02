@@ -1,13 +1,16 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
+import { CheckCircle, ExternalLink, Zap } from "lucide-react";
 import Link from "next/link";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { SuiWalletConnectButton } from "@/components/wallet/SuiWalletConnectButton";
+import { useCoinAllocation } from "@/hooks/useCoinAllocation";
 
 export function AppBar() {
-  // Faucet + Wallet connect only
+  const account = useCurrentAccount();
+  const { hasAllocation, allocate, isAllocating } = useCoinAllocation();
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -60,6 +63,33 @@ export function AppBar() {
               <ExternalLink className="h-3 w-3" />
             </a>
           </Button>
+          {account && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => allocate()}
+              disabled={isAllocating || hasAllocation}
+              className={
+                hasAllocation
+                  ? "border-green-500 text-green-600"
+                  : "border-orange-500 text-orange-600 hover:bg-orange-50"
+              }
+            >
+              {isAllocating ? (
+                "Allocating..."
+              ) : hasAllocation ? (
+                <>
+                  <CheckCircle className="h-3 w-3" />
+                  Gas Allocated
+                </>
+              ) : (
+                <>
+                  <Zap className="h-3 w-3" />
+                  Allocate Gas
+                </>
+              )}
+            </Button>
+          )}
           <ModeToggle />
           <SuiWalletConnectButton />
         </div>
