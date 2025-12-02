@@ -1,6 +1,7 @@
 "use client";
 
 import { Droplets, ExternalLink } from "lucide-react";
+import { fromPromise } from "neverthrow";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,30 +25,37 @@ export function AppBar() {
     }
 
     setIsFaucetLoading(true);
-    try {
-      const response = await fetch("/api/faucet", {
+
+    const result = await fromPromise(
+      fetch("/api/faucet", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ address }),
-      });
+      }).then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Faucet request failed");
+        }
+        return response.json() as Promise<{ txHash: string }>;
+      }),
+      (e) => (e instanceof Error ? e : new Error("Unknown error")),
+    );
 
-      if (!response.ok) {
-        throw new Error("Faucet request failed");
-      }
+    setIsFaucetLoading(false);
 
-      const data = await response.json();
-      toast.success(`Sent 10 ETH to your wallet! TX: ${data.txHash.slice(0, 10)}...`);
-    } catch (_error) {
-      toast.error("Failed to send test ETH. Make sure Anvil is running.");
-    } finally {
-      setIsFaucetLoading(false);
-    }
+    result.match(
+      (data) => {
+        toast.success(`Sent 10 ETH to your wallet! TX: ${data.txHash.slice(0, 10)}...`);
+      },
+      () => {
+        toast.error("Failed to send test ETH. Make sure Anvil is running.");
+      },
+    );
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
       <div className="container flex h-14 items-center justify-between px-4">
         <div className="flex items-center gap-4">
           <Link href="/" className="transition-opacity hover:opacity-80">
