@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Wallet } from "lucide-react";
+import { fromPromise } from "neverthrow";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { type Connector, useConnect } from "wagmi";
@@ -40,11 +41,8 @@ function WalletOption({ connector, onClick }: { connector: Connector; onClick: (
 
   const handleClick = async () => {
     setLoading(true);
-    try {
-      await onClick();
-    } finally {
-      setLoading(false);
-    }
+    await onClick();
+    setLoading(false);
   };
 
   return (
@@ -68,21 +66,27 @@ function WalletOption({ connector, onClick }: { connector: Connector; onClick: (
 }
 
 export function WalletModal({ open, onOpenChange }: WalletModalProps) {
-  const { connectors, connect } = useConnect();
+  const { connectors, connectAsync } = useConnect();
 
   const handleConnect = async (connector: Connector) => {
-    try {
-      await connect({ connector });
-      onOpenChange(false);
-      toast.success(`Connected to ${connector.name}`);
-    } catch (_error) {
-      toast.error(`Failed to connect to ${connector.name}`);
-    }
+    const result = await fromPromise(connectAsync({ connector }), (e) =>
+      e instanceof Error ? e : new Error("Unknown error"),
+    );
+
+    result.match(
+      () => {
+        onOpenChange(false);
+        toast.success(`Connected to ${connector.name}`);
+      },
+      () => {
+        toast.error(`Failed to connect to ${connector.name}`);
+      },
+    );
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <DialogContent className="max-w-md bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wallet className="h-5 w-5" />

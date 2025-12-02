@@ -151,8 +151,9 @@ echo ""
 echo "✅ 全型定義生成完了！"
 '''
 
-[tasks.faucet]
+[tasks."faucet:sepolia"]
 description = "Sepolia faucetをブラウザで開く"
+alias = "faucet"
 run = "open https://sepoliafaucet.com"
 
 # ===============================================
@@ -260,7 +261,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 echo "🔧 ESLint自動修正中..."
-bun eslint src --ext .ts,.tsx --fix || true
+bun eslint . --ext .ts,.tsx,.js --fix
 echo "✅ ESLint修正完了"
 '''
 

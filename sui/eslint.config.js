@@ -48,6 +48,10 @@ export default [
       "no-restricted-syntax": [
         "error",
         {
+          selector: "SwitchStatement",
+          message: "switch 文は禁止です。ts-pattern を使用してください。",
+        },
+        {
           selector: "ConditionalExpression ConditionalExpression ConditionalExpression",
           message: "三項演算子のネストは1段まで。2段以上は ts-pattern を使用してください。",
         },
@@ -92,6 +96,10 @@ export default [
       "prefer-const": "error",
       "no-restricted-syntax": [
         "error",
+        {
+          selector: "SwitchStatement",
+          message: "switch 文は禁止です。ts-pattern を使用してください。",
+        },
         {
           selector: "CallExpression[callee.object.name='console']",
           message: "console の代わりに consola を使用してください。",

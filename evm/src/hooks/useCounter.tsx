@@ -7,6 +7,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fromPromise, type Result } from "neverthrow";
 import { toast } from "sonner";
 import { parseEventLogs } from "viem";
 import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi";
@@ -82,38 +83,43 @@ export function useOwnedCounterList() {
     queryFn: async (): Promise<Array<{ id: bigint }>> => {
       if (!address || !publicClient) return [];
 
-      try {
-        // 1. nextId()で最大IDを取得
-        const nextId = (await publicClient.readContract({
+      const nextIdResult = await fromPromise(
+        publicClient.readContract({
           address: OWNED_COUNTER_REGISTRY_ADDRESS,
           abi: ownedCounterRegistryAbi,
           functionName: "nextId",
-        })) as bigint;
+        }),
+        (e) => (e instanceof Error ? e : new Error("Failed to get nextId")),
+      );
 
-        if (nextId === 0n) return [];
+      if (nextIdResult.isErr()) return [];
 
-        // 2. 各IDのオーナーをチェック
-        const ownedCounters: Array<{ id: bigint }> = [];
+      const nextId = nextIdResult.value as bigint;
+      if (nextId === 0n) return [];
 
-        for (let id = 1n; id <= nextId; id++) {
-          try {
-            const owner = (await publicClient.readContract({
-              address: OWNED_COUNTER_REGISTRY_ADDRESS,
-              abi: ownedCounterRegistryAbi,
-              functionName: "ownerOf",
-              args: [id],
-            })) as `0x${string}`;
+      // 2. 各IDのオーナーをチェック
+      const ownedCounters: Array<{ id: bigint }> = [];
 
-            if (owner.toLowerCase() === address.toLowerCase()) {
-              ownedCounters.push({ id });
-            }
-          } catch {}
+      for (let id = 1n; id <= nextId; id++) {
+        const ownerResult = await fromPromise(
+          publicClient.readContract({
+            address: OWNED_COUNTER_REGISTRY_ADDRESS,
+            abi: ownedCounterRegistryAbi,
+            functionName: "ownerOf",
+            args: [id],
+          }),
+          (e) => (e instanceof Error ? e : new Error("Failed to get owner")),
+        );
+
+        if (ownerResult.isOk()) {
+          const owner = ownerResult.value as `0x${string}`;
+          if (owner.toLowerCase() === address.toLowerCase()) {
+            ownedCounters.push({ id });
+          }
         }
-
-        return ownedCounters;
-      } catch (_error) {
-        return [];
       }
+
+      return ownedCounters;
     },
     enabled: !!address && !!publicClient,
   });
@@ -127,27 +133,28 @@ export function useSharedCounterList() {
     queryFn: async (): Promise<Array<{ id: bigint }>> => {
       if (!publicClient) return [];
 
-      try {
-        // 1. nextId()で最大IDを取得
-        const nextId = (await publicClient.readContract({
+      const nextIdResult = await fromPromise(
+        publicClient.readContract({
           address: SHARED_COUNTER_REGISTRY_ADDRESS,
           abi: sharedCounterRegistryAbi,
           functionName: "nextId",
-        })) as bigint;
+        }),
+        (e) => (e instanceof Error ? e : new Error("Failed to get nextId")),
+      );
 
-        if (nextId === 0n) return [];
+      if (nextIdResult.isErr()) return [];
 
-        // 2. 全IDを収集（shared counterは全員がアクセス可能）
-        const sharedCounters: Array<{ id: bigint }> = [];
+      const nextId = nextIdResult.value as bigint;
+      if (nextId === 0n) return [];
 
-        for (let id = 1n; id <= nextId; id++) {
-          sharedCounters.push({ id });
-        }
+      // 2. 全IDを収集（shared counterは全員がアクセス可能）
+      const sharedCounters: Array<{ id: bigint }> = [];
 
-        return sharedCounters;
-      } catch (_error) {
-        return [];
+      for (let id = 1n; id <= nextId; id++) {
+        sharedCounters.push({ id });
       }
+
+      return sharedCounters;
     },
     enabled: !!publicClient,
   });
@@ -401,14 +408,26 @@ export function useCounter() {
     },
   });
 
+  // ================== Result-wrapped API ==================
+  const wrapMutation = <T, A extends unknown[]>(
+    mutateAsync: (...args: A) => Promise<T>,
+  ): ((...args: A) => Promise<Result<T, Error>>) => {
+    return async (...args: A): Promise<Result<T, Error>> => {
+      const result = await fromPromise(mutateAsync(...args), (e) =>
+        e instanceof Error ? e : new Error("Unknown error"),
+      );
+      return result;
+    };
+  };
+
   // ================== Unified API ==================
   return {
     owned: {
       useValue: useOwnedCounterValue,
       useOwner: useOwnedCounterOwner,
-      mint: mintOwnedCounter.mutateAsync,
-      increment: incrementOwnedCounter.mutateAsync,
-      setValue: setOwnedCounterValue.mutateAsync,
+      mint: wrapMutation(mintOwnedCounter.mutateAsync),
+      increment: wrapMutation(incrementOwnedCounter.mutateAsync),
+      setValue: wrapMutation(setOwnedCounterValue.mutateAsync),
       isPending: {
         mint: mintOwnedCounter.isPending,
         increment: incrementOwnedCounter.isPending,
@@ -417,9 +436,9 @@ export function useCounter() {
     },
     shared: {
       useValue: useSharedCounterValue,
-      create: createSharedCounter.mutateAsync,
-      increment: incrementSharedCounter.mutateAsync,
-      setValue: setSharedCounterValue.mutateAsync,
+      create: wrapMutation(createSharedCounter.mutateAsync),
+      increment: wrapMutation(incrementSharedCounter.mutateAsync),
+      setValue: wrapMutation(setSharedCounterValue.mutateAsync),
       isPending: {
         create: createSharedCounter.isPending,
         increment: incrementSharedCounter.isPending,

@@ -16,14 +16,16 @@ export function SharedCounterCreate() {
   const { create, isPending } = counter.shared;
 
   const handleCreateCounter = async () => {
-    try {
-      const result = await create();
-      toast.success("Shared counter created successfully!");
-      // 新しいカウンターページに遷移
-      router.push(`/shared-counter/${result.counterId}`);
-    } catch {
-      toast.error("Failed to create counter");
-    }
+    const result = await create();
+    result.match(
+      (data) => {
+        toast.success("Shared counter created successfully!");
+        router.push(`/shared-counter/${data.counterId}`);
+      },
+      () => {
+        toast.error("Failed to create counter");
+      },
+    );
   };
 
   if (!isConnected) {

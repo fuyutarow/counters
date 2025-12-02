@@ -451,7 +451,7 @@ echo "   shared_counter: $(solana address -k target/deploy/shared_counter-keypai
 description = "UI依存関係のみインストール"
 run = '''bun install'''
 
-[tasks."ui:dev"]
+[tasks."dev:ui"]
 description = "UI開発サーバーのみ起動"
 run = '''
 #!/usr/bin/env bash
@@ -460,7 +460,7 @@ echo "🌐 フロントエンド開発サーバー起動中..."
 bun run dev
 '''
 
-[tasks."ui:build"]
+[tasks."build:ui"]
 description = "UIのみビルド"
 run = '''
 #!/usr/bin/env bash
