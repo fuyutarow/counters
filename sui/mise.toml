@@ -103,6 +103,7 @@ depends = ["install:ui"]
 
 [tasks.up]
 description = "依存関係を最新バージョンに更新"
+alias = "u"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -113,7 +114,10 @@ echo "📦 package.jsonを最新バージョンに更新中..."
 bunx npm-check-updates -u
 echo ""
 echo "📦 更新された依存関係をインストール中..."
-{{mise_bin}} install:ui
+bun install
+echo ""
+echo "📦 Biome設定をマイグレーション中..."
+bunx @biomejs/biome migrate --write
 echo "✅ 依存関係を最新バージョンに更新完了！"
 '''
 
@@ -204,7 +208,7 @@ run = "bun test --watch"
 
 [tasks."install:ui"]
 description = "UI依存関係のみインストール"
-run = '''npm install'''
+run = '''bun install'''
 
 [tasks."build:ui"]
 description = "UIのみビルド"
