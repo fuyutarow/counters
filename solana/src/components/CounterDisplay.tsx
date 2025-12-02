@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2, Zap } from "lucide-react";
 import { useId, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,12 +14,15 @@ interface CounterDisplayProps {
   value: string;
   isLoading: boolean;
   isIncrementing: boolean;
+  isSponsoredIncrementing?: boolean;
   isSettingValue: boolean;
   onIncrement: () => Promise<void>;
+  onIncrementSponsored?: () => Promise<void>;
   onSetValue: (value: number) => Promise<void>;
   error?: Error | null;
   owner?: string;
   creator?: string;
+  hasSponsor?: boolean;
 }
 
 export function CounterDisplay({
@@ -28,12 +31,15 @@ export function CounterDisplay({
   value,
   isLoading,
   isIncrementing,
+  isSponsoredIncrementing = false,
   isSettingValue,
   onIncrement,
+  onIncrementSponsored,
   onSetValue,
   error,
   owner,
   creator,
+  hasSponsor = false,
 }: CounterDisplayProps) {
   const [newValue, setNewValue] = useState("");
   const inputId = useId();
@@ -101,7 +107,11 @@ export function CounterDisplay({
 
           {/* Action Buttons */}
           <div className="space-y-4">
-            <Button onClick={onIncrement} disabled={isIncrementing} className="w-full">
+            <Button
+              onClick={onIncrement}
+              disabled={isIncrementing || isSponsoredIncrementing}
+              className="w-full"
+            >
               {isIncrementing ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -111,6 +121,28 @@ export function CounterDisplay({
                 "Increment (+1)"
               )}
             </Button>
+
+            {onIncrementSponsored && (
+              <Button
+                onClick={onIncrementSponsored}
+                disabled={!hasSponsor || isIncrementing || isSponsoredIncrementing}
+                variant="outline"
+                className="w-full border-green-500 text-green-600 hover:bg-green-50 disabled:opacity-50"
+                title={!hasSponsor ? "Sponsor not available" : undefined}
+              >
+                {isSponsoredIncrementing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Incrementing...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Increment (Sponsored - Gas-free)
+                  </>
+                )}
+              </Button>
+            )}
 
             {/* Set Value Section */}
             <div className="space-y-2">

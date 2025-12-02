@@ -1,9 +1,12 @@
 "use client";
 
+import * as anchor from "@coral-xyz/anchor";
 import { ExternalLink } from "lucide-react";
 import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCounter, useSharedCounterValue } from "@/hooks/useCounter";
+import { useProgram } from "@/hooks/useProgram";
+import { useSponsoredTransaction } from "@/hooks/useSponsoredTransaction";
 
 interface SharedCounterProps {
   id: string;
@@ -11,17 +14,43 @@ interface SharedCounterProps {
 
 export function SharedCounter({ id }: SharedCounterProps) {
   const counter = useCounter();
+  const { sharedCounterProgram, publicKey } = useProgram();
 
   // Type-safe data fetching for shared counters only
   const { data, isLoading, error, refetch } = useSharedCounterValue(id);
 
+  // Sponsored transaction hook (1RT)
+  const sponsoredTx = useSponsoredTransaction({
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
   // Shared counter operations
   const isIncrementing = counter.shared.isPending.increment;
+  const isSponsoredIncrementing = sponsoredTx.isPending;
   const isSettingValue = counter.shared.isPending.setValue;
 
   const handleIncrement = async () => {
     await counter.shared.increment(id);
     refetch();
+  };
+
+  const handleIncrementSponsored = async () => {
+    if (!sharedCounterProgram || !publicKey) {
+      throw new Error("Program or wallet not available");
+    }
+
+    // Build instruction for sponsored transaction
+    const instruction = await sharedCounterProgram.methods
+      .increment()
+      .accountsPartial({
+        counter: new anchor.web3.PublicKey(id),
+        caller: publicKey,
+      })
+      .instruction();
+
+    await sponsoredTx.mutateAsync([instruction]);
   };
 
   const handleSetValue = async (value: number) => {
@@ -70,10 +99,13 @@ export function SharedCounter({ id }: SharedCounterProps) {
       value={data?.value ?? ""}
       isLoading={isLoading}
       isIncrementing={isIncrementing}
+      isSponsoredIncrementing={isSponsoredIncrementing}
       isSettingValue={isSettingValue}
       onIncrement={handleIncrement}
+      onIncrementSponsored={handleIncrementSponsored}
       onSetValue={handleSetValue}
       error={error}
+      hasSponsor={sponsoredTx.hasSponsor}
     />
   );
 }

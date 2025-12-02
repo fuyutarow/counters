@@ -2,6 +2,7 @@
 
 import * as anchor from "@coral-xyz/anchor";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import consola from "consola";
 import { toast } from "sonner";
 import { useProgram } from "./useProgram";
 
@@ -201,6 +202,18 @@ export function useCounter() {
         throw new Error("Program or wallet not available");
       }
 
+      const totalStart = performance.now();
+
+      // Step 1: Get recent blockhash
+      const blockhashStart = performance.now();
+      const { blockhash, lastValidBlockHeight } =
+        await sharedCounterProgram.provider.connection.getLatestBlockhash("confirmed");
+      const blockhashTime = performance.now() - blockhashStart;
+      consola.info(`[Normal] 1. Get blockhash: ${blockhashTime.toFixed(0)}ms`);
+
+      // Step 2: Build and Sign + Execute (Anchor .rpc() combines these)
+      // Note: Anchor's rpc() includes sign + send + confirm, so we measure it together
+      const rpcStart = performance.now();
       const signature = await sharedCounterProgram.methods
         .increment()
         .accountsPartial({
@@ -208,6 +221,40 @@ export function useCounter() {
           caller: publicKey,
         })
         .rpc();
+      const rpcTime = performance.now() - rpcStart;
+      consola.info(`[Normal] 2. Sign + Execute (rpc): ${rpcTime.toFixed(0)}ms`);
+
+      // Step 3: Additional confirmation check
+      const waitStart = performance.now();
+      await sharedCounterProgram.provider.connection.confirmTransaction(
+        {
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        },
+        "confirmed",
+      );
+      const waitTime = performance.now() - waitStart;
+      consola.info(`[Normal] 3. Wait for tx: ${waitTime.toFixed(0)}ms`);
+
+      const totalTime = performance.now() - totalStart;
+      // System time excludes user sign wait (which is inside rpc())
+      // For fair comparison, we note that rpcTime includes user wait
+      const systemTime = blockhashTime + waitTime;
+
+      consola.box(
+        `┌─ Normal Transaction (Shared) ────────────────┐
+│                                              │
+│  1. Get blockhash:        ${blockhashTime.toFixed(0).padStart(5)}ms            │
+│  2. Sign+Execute (rpc):   ${rpcTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  3. Wait for tx:          ${waitTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):      ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:        ${systemTime.toFixed(0).padStart(5)}ms            │
+│  (rpc includes user approval wait)           │
+└──────────────────────────────────────────────┘`,
+      );
 
       showTxSuccessToast("Shared counter incremented successfully!", signature);
       await Promise.all([
@@ -216,6 +263,7 @@ export function useCounter() {
       ]);
     },
     onError: (error) => {
+      consola.error(`[Normal Shared] Error: ${error.message}`);
       toast.error("Failed to increment shared counter", {
         description: error.message,
       });
