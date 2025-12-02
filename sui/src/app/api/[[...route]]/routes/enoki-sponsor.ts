@@ -1,14 +1,14 @@
 /**
- * Enoki Sponsored Transaction API
+ * Enoki Sponsored Transaction Routes
  *
- * This endpoint sponsors transactions using Enoki's infrastructure.
+ * POST /api/tx/enoki - Create sponsored transaction via Enoki
+ * PUT  /api/tx/enoki - Execute sponsored transaction via Enoki
  */
 
 import { EnokiClient } from "@mysten/enoki";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
 import consola from "consola";
 import { Hono } from "hono";
-import { handle } from "hono/vercel";
 import { err, ResultAsync } from "neverthrow";
 
 import { serverEnv } from "@/env/server";
@@ -55,8 +55,8 @@ function getAllowedMoveCallTargets(network: NetworkName): string[] {
   ];
 }
 
-const app = new Hono()
-  .basePath("/api/sponsor-tx")
+export const enokiSponsorRoutes = new Hono()
+  // POST /api/tx/enoki - Create sponsored transaction
   .post("/", async (c) => {
     const result = await ResultAsync.fromPromise(
       c.req.json() as Promise<{
@@ -79,7 +79,7 @@ const app = new Hono()
       const enokiClient = getEnokiClient();
       const allowedMoveCallTargets = getAllowedMoveCallTargets(normalized);
 
-      consola.info("Creating sponsored transaction", {
+      consola.info("[Enoki] Creating sponsored transaction", {
         sender,
         network: normalized,
         allowedMoveCallTargets: allowedMoveCallTargets.length,
@@ -100,7 +100,7 @@ const app = new Hono()
 
     return result.match(
       (response) => {
-        consola.success("Sponsored transaction created", { digest: response.digest });
+        consola.success("[Enoki] Sponsored transaction created", { digest: response.digest });
         return c.json({
           bytes: response.bytes,
           digest: response.digest,
@@ -108,11 +108,15 @@ const app = new Hono()
       },
       (error) => {
         const status = error.message.includes("Missing") ? 400 : 500;
-        consola.error("Failed to create sponsored transaction", { error: error.message, status });
+        consola.error("[Enoki] Failed to create sponsored transaction", {
+          error: error.message,
+          status,
+        });
         return c.json({ error: error.message }, status);
       },
     );
   })
+  // PUT /api/tx/enoki - Execute sponsored transaction
   .put("/", async (c) => {
     const result = await ResultAsync.fromPromise(
       c.req.json() as Promise<{
@@ -134,7 +138,7 @@ const app = new Hono()
       const enokiClient = getEnokiClient();
       const suiClient = getSuiClient(normalized);
 
-      consola.info("Executing sponsored transaction", { digest, network: normalized });
+      consola.info("[Enoki] Executing sponsored transaction", { digest, network: normalized });
 
       return ResultAsync.fromPromise(
         enokiClient.executeSponsoredTransaction({
@@ -160,7 +164,7 @@ const app = new Hono()
 
     return result.match(
       (response) => {
-        consola.success("Sponsored transaction executed", { digest: response.digest });
+        consola.success("[Enoki] Sponsored transaction executed", { digest: response.digest });
         return c.json({
           digest: response.digest,
           success: response.effects?.status?.status === "success",
@@ -168,13 +172,11 @@ const app = new Hono()
       },
       (error) => {
         const status = error.message.includes("Missing") ? 400 : 500;
-        consola.error("Failed to execute sponsored transaction", { error: error.message, status });
+        consola.error("[Enoki] Failed to execute sponsored transaction", {
+          error: error.message,
+          status,
+        });
         return c.json({ error: error.message }, status);
       },
     );
   });
-
-export const runtime = "nodejs";
-
-export const POST = handle(app);
-export const PUT = handle(app);

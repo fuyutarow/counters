@@ -1,7 +1,7 @@
 /**
- * Hook for Enoki-sponsored transactions
+ * Hook for self-sponsored transactions (backend pays gas directly)
  *
- * Uses `/api/tx/enoki` endpoint (Enoki API for sponsorship).
+ * Uses `/api/tx/self` endpoint where the backend signs with its own keypair.
  */
 
 import { toBase64 } from "@mysten/bcs";
@@ -12,20 +12,20 @@ import { useMutation } from "@tanstack/react-query";
 import consola from "consola";
 import { toast } from "sonner";
 
-type SponsoredTransactionOptions = {
+type SelfSponsoredTransactionOptions = {
   onSuccess?: (digest: string) => void;
   onError?: (error: Error) => void;
   showNotifications?: boolean;
 };
 
-type SponsoredTransactionResult = Omit<
+type SelfSponsoredTransactionResult = Omit<
   ReturnType<typeof useMutation<SuiTransactionBlockResponse, Error, Transaction>>,
   never
 >;
 
-export function useSponsoredTransaction(
-  options?: SponsoredTransactionOptions,
-): SponsoredTransactionResult {
+export function useSelfSponsoredTransaction(
+  options?: SelfSponsoredTransactionOptions,
+): SelfSponsoredTransactionResult {
   const client = useSuiClient();
   const account = useCurrentAccount();
   const { currentWallet } = useCurrentWallet();
@@ -52,13 +52,13 @@ export function useSponsoredTransaction(
         onlyTransactionKind: true,
       });
       const buildTime = performance.now() - buildStart;
-      consola.info(`[Enoki] 1. Build transaction: ${buildTime.toFixed(0)}ms`);
+      consola.info(`[Self] 1. Build transaction: ${buildTime.toFixed(0)}ms`);
 
       const transactionKindBytesBase64 = toBase64(transactionKindBytes);
       const apiUrl =
-        typeof window !== "undefined" ? `${window.location.origin}/api/tx/enoki` : "/api/tx/enoki";
+        typeof window !== "undefined" ? `${window.location.origin}/api/tx/self` : "/api/tx/self";
 
-      // Step 2: Request sponsorship
+      // Step 2: Request sponsorship from backend
       const sponsorStart = performance.now();
       const sponsorResponse = await fetch(apiUrl, {
         method: "POST",
@@ -69,21 +69,21 @@ export function useSponsoredTransaction(
           transactionKindBytes: transactionKindBytesBase64,
           sender: account.address,
           network: "testnet",
-          allowedAddresses: [account.address],
         }),
       });
 
       if (!sponsorResponse.ok) {
         const errorData = await sponsorResponse.json().catch(() => undefined);
-        throw new Error(errorData?.error || "Failed to sponsor transaction");
+        throw new Error(errorData?.error || "Failed to create sponsored transaction");
       }
 
       const { bytes, digest } = (await sponsorResponse.json()) as {
         bytes: string;
         digest: string;
+        sponsor: string;
       };
       const sponsorTime = performance.now() - sponsorStart;
-      consola.info(`[Enoki] 2. Request sponsorship (API POST): ${sponsorTime.toFixed(0)}ms`);
+      consola.info(`[Self] 2. Create sponsored tx (API POST): ${sponsorTime.toFixed(0)}ms`);
 
       // Step 3: Sign transaction
       const signStart = performance.now();
@@ -99,9 +99,9 @@ export function useSponsoredTransaction(
         throw new Error("Failed to sign transaction");
       }
       const signTime = performance.now() - signStart;
-      consola.info(`[Enoki] 3. Sign transaction (wallet): ${signTime.toFixed(0)}ms`);
+      consola.info(`[Self] 3. Sign transaction (wallet): ${signTime.toFixed(0)}ms`);
 
-      // Step 4: Execute sponsored transaction
+      // Step 4: Execute with both signatures (user + sponsor)
       const executeStart = performance.now();
       const executeResponse = await fetch(apiUrl, {
         method: "PUT",
@@ -111,18 +111,17 @@ export function useSponsoredTransaction(
         body: JSON.stringify({
           digest,
           signature: signResponse.signature,
-          network: "testnet",
         }),
       });
 
       if (!executeResponse.ok) {
         const errorData = await executeResponse.json().catch(() => undefined);
-        throw new Error(errorData?.error || "Failed to execute sponsored transaction");
+        throw new Error(errorData?.error || "Failed to execute transaction");
       }
 
       const executionResult = (await executeResponse.json()) as { digest: string };
       const executeTime = performance.now() - executeStart;
-      consola.info(`[Enoki] 4. Execute sponsored tx (API PUT): ${executeTime.toFixed(0)}ms`);
+      consola.info(`[Self] 4. Execute tx (API PUT): ${executeTime.toFixed(0)}ms`);
 
       // Step 5: Wait for transaction
       const waitStart = performance.now();
@@ -135,7 +134,7 @@ export function useSponsoredTransaction(
         },
       });
       const waitTime = performance.now() - waitStart;
-      consola.info(`[Enoki] 5. Wait for transaction: ${waitTime.toFixed(0)}ms`);
+      consola.info(`[Self] 5. Wait for transaction: ${waitTime.toFixed(0)}ms`);
 
       if (result.effects?.status?.status !== "success") {
         throw new Error(`Transaction failed: ${result.effects?.status?.error || "Unknown error"}`);
@@ -145,7 +144,7 @@ export function useSponsoredTransaction(
       const systemTime = buildTime + sponsorTime + executeTime + waitTime;
 
       consola.box(
-        `┌─ Enoki Sponsored Transaction ────────────────┐
+        `┌─ Self-Sponsored Transaction ─────────────────┐
 │                                              │
 │  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
 │  2. Sponsor (POST):     ${sponsorTime.toFixed(0).padStart(5)}ms            │
@@ -164,14 +163,14 @@ export function useSponsoredTransaction(
     },
     onSuccess: (result) => {
       if (showNotifications) {
-        toast.success("Transaction successful! (Enoki)", {
+        toast.success("Transaction successful! (Self-Sponsored)", {
           description: `Digest: ${result.digest}`,
         });
       }
       options?.onSuccess?.(result.digest);
     },
     onError: (error) => {
-      consola.error(`[Enoki] Error: ${error.message}`);
+      consola.error(`[Self] Error: ${error.message}`);
       if (showNotifications) {
         toast.error("Transaction failed", {
           description: error.message,

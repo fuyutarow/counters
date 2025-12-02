@@ -10,7 +10,11 @@
       "Bash(sui client publish:*)",
       "Bash(sui client object:*)",
       "Bash(rip:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(sui client addresses:*)",
+      "Bash(sui keytool export:*)",
+      "Bash(sui client balance:*)",
+      "Bash(sui client faucet:*)"
     ],
     "deny": [],
     "ask": []
