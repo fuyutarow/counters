@@ -108,6 +108,17 @@ export function useCounter() {
         throw new Error("Program or wallet not available");
       }
 
+      const totalStart = performance.now();
+
+      // Step 1: Get recent blockhash
+      const blockhashStart = performance.now();
+      const { blockhash, lastValidBlockHeight } =
+        await ownedCounterProgram.provider.connection.getLatestBlockhash("confirmed");
+      const blockhashTime = performance.now() - blockhashStart;
+      consola.info(`[Normal Owned] 1. Get blockhash: ${blockhashTime.toFixed(0)}ms`);
+
+      // Step 2: Build and Sign + Execute (Anchor .rpc() combines these)
+      const rpcStart = performance.now();
       const signature = await ownedCounterProgram.methods
         .increment()
         .accountsPartial({
@@ -115,6 +126,38 @@ export function useCounter() {
           owner: publicKey,
         })
         .rpc();
+      const rpcTime = performance.now() - rpcStart;
+      consola.info(`[Normal Owned] 2. Sign + Execute (rpc): ${rpcTime.toFixed(0)}ms`);
+
+      // Step 3: Additional confirmation check
+      const waitStart = performance.now();
+      await ownedCounterProgram.provider.connection.confirmTransaction(
+        {
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        },
+        "confirmed",
+      );
+      const waitTime = performance.now() - waitStart;
+      consola.info(`[Normal Owned] 3. Wait for tx: ${waitTime.toFixed(0)}ms`);
+
+      const totalTime = performance.now() - totalStart;
+      const systemTime = blockhashTime + waitTime;
+
+      consola.box(
+        `┌─ Normal Transaction (Owned) ─────────────────┐
+│                                              │
+│  1. Get blockhash:        ${blockhashTime.toFixed(0).padStart(5)}ms            │
+│  2. Sign+Execute (rpc):   ${rpcTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  3. Wait for tx:          ${waitTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):      ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:        ${systemTime.toFixed(0).padStart(5)}ms            │
+│  (rpc includes user approval wait)           │
+└──────────────────────────────────────────────┘`,
+      );
 
       showTxSuccessToast("Counter incremented successfully!", signature);
       await Promise.all([
@@ -123,6 +166,7 @@ export function useCounter() {
       ]);
     },
     onError: (error) => {
+      consola.error(`[Normal Owned] Error: ${error.message}`);
       toast.error("Failed to increment counter", {
         description: error.message,
       });

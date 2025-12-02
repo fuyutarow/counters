@@ -25,14 +25,19 @@ import { serverEnv } from "@/env/server";
 // Program IDs for validation
 const ALLOWED_PROGRAM_IDS = [
   "GPmMruCgQL4HLkt4KDzSRd4KrZ3uRBa3mCzxdtLuAaeY", // shared_counter
-  "8YtCv2Y9U4Y4q7F4yVrYPjvLLwvmyKuHqN3v6kLvGBJd", // owned_counter (if exists)
+  "Afj1Jid7Hwr9Pa7wUnZ4MHVq1MJQtd2Tk3jcTCHJh6rq", // owned_counter (localnet)
   "11111111111111111111111111111111", // System Program
 ];
 
-type Network = "devnet" | "mainnet-beta" | "testnet";
+type Network = "devnet" | "mainnet-beta" | "testnet" | "localnet";
 
 function normalizeNetwork(network: string): Network {
-  if (network === "devnet" || network === "mainnet-beta" || network === "testnet") {
+  if (
+    network === "devnet" ||
+    network === "mainnet-beta" ||
+    network === "testnet" ||
+    network === "localnet"
+  ) {
     return network;
   }
   return "devnet";
@@ -50,6 +55,9 @@ function getSponsorKeypair(): Result<Keypair, Error> {
 }
 
 function getConnection(network: Network): Connection {
+  if (network === "localnet") {
+    return new Connection("http://localhost:8899", "confirmed");
+  }
   return new Connection(clusterApiUrl(network), "confirmed");
 }
 

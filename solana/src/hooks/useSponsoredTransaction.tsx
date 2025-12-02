@@ -41,10 +41,12 @@ export function useSponsorInfo() {
   return useQuery({
     queryKey: ["sponsor-info"],
     queryFn: async (): Promise<SponsorInfo> => {
+      // Use localnet for local development
+      const network = "localnet";
       const apiUrl =
         typeof window !== "undefined"
-          ? `${window.location.origin}/api/tx/sponsor/info?network=devnet`
-          : "/api/tx/sponsor/info?network=devnet";
+          ? `${window.location.origin}/api/tx/sponsor/info?network=${network}`
+          : `/api/tx/sponsor/info?network=${network}`;
 
       const response = await fetch(apiUrl);
       if (!response.ok) {
@@ -123,7 +125,7 @@ export function useSponsoredTransaction(options?: SponsoredTransactionOptions) {
         },
         body: JSON.stringify({
           txBytes: serializedTx,
-          network: "devnet",
+          network: "localnet",
         }),
       });
 
