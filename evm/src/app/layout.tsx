@@ -12,7 +12,6 @@ export const metadata: Metadata = {
   description: "Owned and Shared Counter dApps on Ethereum",
 };
 
-export const runtime = "edge";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
