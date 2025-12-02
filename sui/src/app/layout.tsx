@@ -13,7 +13,6 @@ export const metadata: Metadata = {
   description: "Counter smart contracts demo on Sui blockchain using Move",
 };
 
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>

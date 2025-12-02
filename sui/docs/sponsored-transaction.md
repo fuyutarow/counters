@@ -1,45 +1,136 @@
 # Sponsored Transaction
 
-## 結論
+## 概要
 
-| 方式 | System Time | API Calls | 用途 |
-|------|-------------|-----------|------|
-| **Normal** | ~100ms | 1 (wallet経由) | 日常操作、高頻度、パフォーマンス重視 |
-| **1RT Pre-allocated** | ~450-800ms | 1 (事前allocate済み) | 高速＋ガス代ゼロ |
-| **Enoki Sponsored** | ~2,000-4,600ms | 3 (POST→Sign→PUT) | オンボーディング、設定不要 |
+Sui のスポンサードトランザクションは、ユーザーの代わりにスポンサーがガス代を支払う仕組み。
+本プロジェクトでは 3 つの方式を実装している。
 
-**1RTはEnokiの5-10倍速く、Normalに近いパフォーマンスでガス代をゼロにできる。**
+## 本質的なオーバーヘッド
 
-## 3方式の比較
+すべての方式で避けられない処理：
+
+| 処理 | 理由 |
+|------|------|
+| **オブジェクト参照解決 (RPC)** | Sui の UTXO モデルでは `objectId + version + digest` が必要。version/digest は変わるため毎回取得が必要 |
+| **ユーザー署名** | セキュリティ上必須。ウォレット UI の表示時間含む |
+| **トランザクション実行 (RPC)** | RPC ノードへの送信・確定待ち |
+
+## 3 方式の比較
 
 ```text
 Normal                 1RT Pre-allocated           Enoki Sponsored
 ──────────────────     ──────────────────────      ──────────────────────────
-1. Build:       0ms    1. Build:        50-100ms   1. Build:         200ms
-2. Sign+Exec: ⏱️ user  2. Sign:         ⏱️ user    2. Sponsor POST:  500-1000ms
-3. Invalidate: 100ms   3. Execute:      200-400ms  3. Sign:          ⏱️ user
-                       4. Wait:         200-300ms  4. Execute PUT:   1200-3200ms
-                                                   5. Wait:          200ms
+[オブジェクト解決]     [オブジェクト解決]          [オブジェクト解決]
+        ↓                      ↓                           ↓
+[ユーザー署名+実行]    [ユーザー署名]              [Enoki POST: sponsor準備]
+        ↓                      ↓                           ↓
+      完了             [Backend実行 (1RT)]         [ユーザー署名]
+                               ↓                           ↓
+                             完了                  [Enoki PUT: 実行]
+                                                           ↓
+                                                         完了
 ──────────────────     ──────────────────────      ──────────────────────────
-System: ~100ms         System: ~450-800ms          System: ~2000-4600ms
+API往復: 0回           API往復: 1回                API往復: 2回
 ```
 
-⏱️ = ユーザー操作待ち時間（System timeから除外）
+| 方式 | ガス代 | API往復 | 用途 |
+|------|--------|---------|------|
+| **Normal** | ユーザー負担 | 0 | 日常操作、高頻度 |
+| **1RT Pre-allocated** | スポンサー負担 | 1 | ガス代ゼロ + 高速 |
+| **Enoki Sponsored** | スポンサー負担 | 2 | オンボーディング、設定不要 |
 
-## 1RT Pre-allocated Transaction
+## 実測値 (testnet)
 
-### 概要
+```text
+┌─ Normal Transaction ─────────────────────────┐
+│  1. Build (resolve+gas):   611ms             │
+│  2. Sign:                 3693ms  ⏱️ user    │
+│  3. Execute:              2901ms             │
+│  4. Wait for tx:           130ms             │
+├──────────────────────────────────────────────┤
+│  System time only:        3642ms             │
+└──────────────────────────────────────────────┘
 
-事前にスポンサーからガス用コインを割り当て（allocate）しておき、クライアントが既知のcoinIdでトランザクションを構築・署名し、バックエンドへ1回のAPI呼び出しで実行する方式。
+┌─ Pre-allocated 1RT Transaction ──────────────┐
+│  1. Build (with coin):      387ms            │
+│  2. Sign:                  3711ms  ⏱️ user   │
+│  3. Execute (1RT):         2989ms            │
+│  4. Wait for tx:            219ms            │
+├──────────────────────────────────────────────┤
+│  System time only:         3594ms            │
+└──────────────────────────────────────────────┘
 
-### フロー
+┌─ Enoki Sponsored Transaction ────────────────┐
+│  1. Build:                 232ms             │
+│  2. Sponsor (POST):        581ms             │
+│  3. Sign:                 3359ms  ⏱️ user    │
+│  4. Execute (PUT):        3169ms             │
+│  5. Wait for tx:           216ms             │
+├──────────────────────────────────────────────┤
+│  System time only:        4197ms             │
+└──────────────────────────────────────────────┘
+```
+
+⏱️ = ユーザー操作待ち時間（System time から除外）
+
+### 時間収支 (MECE)
+
+| 処理 | 必須? | Normal | 1RT | Enoki |
+|------|-------|--------|-----|-------|
+| **Build (オブジェクト解決)** | ✅ 必須 | - | 387ms | 232ms |
+| **Build (ガス見積もり)** | スキップ可 | 611ms (含む) | - | - |
+| **Sponsor API** | 方式依存 | - | - | 581ms |
+| **ユーザー署名** | ✅ 必須 | ⏱️ | ⏱️ | ⏱️ |
+| **トランザクション実行** | ✅ 必須 | 2,901ms | 2,989ms | 3,169ms |
+| **確定待ち** | ✅ 必須 | 130ms ※ | 219ms | 216ms |
+| **System time 合計** | | **~3,640ms** | **~3,600ms** | **~4,200ms** |
+
+※ Normal の確定待ちが短いのは署名数の違い（1 vs 2）による署名検証オーバーヘッドの差。
+
+**結論**: トランザクション実行時間は3方式でほぼ同等 (~2,900-3,200ms)。RPC ノードへの送信と Sui Network の確定処理は共通インフラのため差が出ない。
+
+### Owned vs Shared Counter
+
+Shared Counter でも同様の計測を実施した結果：
+
+| 方式 | Owned Execute | Shared Execute | 差分 |
+|------|---------------|----------------|------|
+| Normal | 2,901ms | 2,800-3,100ms | 誤差範囲 |
+| 1RT | 2,989ms | 2,900-3,000ms | 誤差範囲 |
+| Enoki | 3,169ms | 1,100-3,400ms | 高バラつき |
+
+**知見**:
+
+- **オブジェクト種別（owned/shared）による性能差はない** - RPC ノード遅延が支配的要因
+- Enoki の Execute 時間には高いバラつきがある（1,102ms〜3,440ms）- Enoki サーバー側の負荷状況に依存
+
+**凡例**:
+
+- ✅ 必須: 全方式で避けられない処理
+- スキップ可: `setGasBudget()` で固定値指定により回避可能
+- 方式依存: 特定の方式でのみ発生
+- ⏱️: ユーザー操作待ち（System time から除外）
+
+### 最適化ポイント
+
+| 処理 | 最適化方法 |
+|------|-----------|
+| オブジェクト参照解決 | 不可（Sui の UTXO モデル上必須） |
+| ガス見積もり | `setGasBudget()` で固定値指定 → スキップ (~300ms 削減) |
+| Sponsor API | 1RT 方式で Enoki 経由を回避 (~600ms 削減) |
+| トランザクション実行 | RPC ノードの遅延に依存（制御不可） |
+| 確定待ち | RPC ノードの遅延に依存（制御不可） |
+
+## フロー詳細
+
+### 1RT Pre-allocated Transaction
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant W as Wallet
     participant B as Backend
-    participant S as Sui Network
+    participant S as RPC Node
 
     Note over C,S: 事前準備（1回のみ）
     C->>B: POST /api/tx/self/allocate
@@ -48,72 +139,21 @@ sequenceDiagram
     B-->>C: allocation info + sponsor address
 
     Note over C,S: 実際のトランザクション（1RT）
-    C->>C: Build tx (setSender, setGasOwner, setGasPayment)
+    C->>S: Build tx (オブジェクト参照解決 RPC)
+    C->>C: setSender, setGasOwner, setGasPayment, setGasBudget
     C->>W: Sign request
     Note over W: ⏱️ User approval
     W-->>C: userSignature
     C->>B: POST /execute-preallocated (txBytes + signature)
-    B->>B: Sign as sponsor (gasOwner)
+    B->>B: Sign as sponsor (~3ms)
     B->>S: Execute with [userSig, sponsorSig]
+    S-->>S: (Sui Network 確定)
     S-->>B: Result
     B-->>C: digest
     C->>S: Wait for tx
 ```
 
-### なぜ速いか
-
-1. **事前アロケーション**: coinId/version/digestが既知なので、ビルド時に追加RPC不要
-2. **単一API呼び出し**: Enokiの2往復（POST→PUT）が1往復に削減
-3. **直接実行**: Enoki経由ではなく、Backend→Sui Networkへ直接送信
-
-### 想定時間内訳
-
-```text
-┌─ Pre-allocated 1RT Transaction ──────────────┐
-│                                              │
-│  1. Build (with coin):       50ms            │
-│  2. Sign:                  3000ms  ⏱️ user   │
-│  3. Execute (1RT):          300ms            │
-│  4. Wait for tx:            250ms            │
-│                                              │
-├──────────────────────────────────────────────┤
-│  Total (wall clock):       3600ms            │
-│  System time only:          600ms            │
-│  (excludes user approval wait)               │
-└──────────────────────────────────────────────┘
-```
-
-### トランザクション構成
-
-```typescript
-// Client側
-transaction.setSender(userAddress);           // ユーザーが送信者
-transaction.setGasOwner(sponsorAddress);      // スポンサーがガス支払い
-transaction.setGasPayment([{
-  objectId: allocation.coinId,
-  version: allocation.version,
-  digest: allocation.digest,
-}]);
-
-// Build & Sign
-const txBytes = await transaction.build({ client });
-const { signature: userSignature } = await wallet.signTransaction(txBytes);
-
-// Backend側
-const { signature: sponsorSignature } = await sponsorKeypair.signTransaction(txBytes);
-await client.executeTransactionBlock({
-  transactionBlock: txBytes,
-  signature: [userSignature, sponsorSignature],  // 両方の署名
-});
-```
-
-## Enoki Sponsored Transaction
-
-### Enoki概要
-
-Mysten LabsのEnokiサービスを利用したスポンサードトランザクション。設定が簡単だが、Enoki APIを経由するため遅延が大きい。
-
-### Enokiフロー
+### Enoki Sponsored Transaction
 
 ```mermaid
 sequenceDiagram
@@ -121,13 +161,13 @@ sequenceDiagram
     participant B as Backend
     participant E as Enoki
     participant W as Wallet
-    participant S as Sui Network
+    participant S as RPC Node
 
-    C->>S: Build tx (onlyTransactionKind)
+    C->>S: Build tx (オブジェクト参照解決 RPC)
     C->>B: POST /api/tx/enoki
     B->>E: createSponsoredTransaction
     E-->>B: sponsored bytes + digest
-    B-->>C: bytes + digest (500-1000ms)
+    B-->>C: bytes + digest
 
     C->>W: Sign request
     Note over W: ⏱️ User approval
@@ -138,56 +178,17 @@ sequenceDiagram
     E->>S: Submit tx
     S-->>E: Result
     E-->>B: Result
-    B-->>C: digest (1200-3200ms)
+    B-->>C: digest
 
-    C->>S: Wait for tx (200ms)
+    C->>S: Wait for tx
 ```
-
-### ボトルネック
-
-```mermaid
-pie title Enoki Sponsored System Time 内訳
-    "Build (RPC)" : 214
-    "Sponsor POST" : 729
-    "Execute PUT" : 2224
-    "Wait for tx" : 218
-```
-
-**Execute PUT** が最大のボトルネック（全体の65%）。
-
-- Enoki → Sui Network → Enoki → Backend → Client の往復
-- ネットワーク状況により1〜3秒のばらつき
-
-## 計測結果（実測値）
-
-### Owned Counter
-
-| 指標 | Normal | 1RT (想定) | Enoki Sponsored |
-|------|--------|------------|-----------------|
-| **System time** | 109ms | 450-800ms | 4,633ms |
-| Wall clock | 7,865ms | ~4,000ms | 7,877ms |
-
-### Shared Counter
-
-| 指標 | Normal | Enoki (1回目) | Enoki (2回目) |
-|------|--------|---------------|---------------|
-| **System time** | 102-107ms | 2,368ms | 4,067ms |
-| Wall clock | 7,044-8,019ms | 6,418ms | 7,669ms |
 
 ## ユースケース判断
-
-| 方式 | 推奨シーン |
-|------|-----------|
-| **Normal** | 日常操作、高頻度、ゲーム内アクション |
-| **1RT Pre-allocated** | ガス代ゼロ＋高速が必要、リピートユーザー |
-| **Enoki Sponsored** | オンボーディング、初回体験、設定の手間を省きたい |
-
-### 選択フローチャート
 
 ```text
 ユーザーがガス代を払える？
 ├─ Yes → Normal（最速）
-└─ No → パフォーマンス重視？
+└─ No → 自前スポンサー運用できる？
          ├─ Yes → 1RT Pre-allocated
          └─ No → Enoki Sponsored（設定簡単）
 ```
@@ -196,44 +197,24 @@ pie title Enoki Sponsored System Time 内訳
 
 | ファイル | 役割 |
 |---------|------|
-| [usePreallocatedTransaction.ts](../src/hooks/usePreallocatedTransaction.ts) | 1RT Pre-allocatedフック |
+| [usePreallocatedTransaction.ts](../src/hooks/usePreallocatedTransaction.ts) | 1RT Pre-allocated フック |
 | [useCoinAllocation.ts](../src/hooks/useCoinAllocation.ts) | コインアロケーション管理 |
-| [self-sponsor.ts](../src/app/api/[[...route]]/routes/self-sponsor.ts) | 1RT バックエンドAPI |
-| [useSponsoredTransaction.ts](../src/hooks/useSponsoredTransaction.ts) | Enoki Sponsoredフック |
-| [enoki-sponsor.ts](../src/app/api/[[...route]]/routes/enoki-sponsor.ts) | Enoki バックエンドAPI |
-| [useCounter.tsx](../src/hooks/useCounter.tsx) | Normalトランザクション |
+| [self-sponsor.ts](../src/app/api/[[...route]]/routes/self-sponsor.ts) | 1RT バックエンド API |
+| [useSponsoredTransaction.ts](../src/hooks/useSponsoredTransaction.ts) | Enoki Sponsored フック |
+| [enoki-sponsor.ts](../src/app/api/[[...route]]/routes/enoki-sponsor.ts) | Enoki バックエンド API |
+| [useCounter.tsx](../src/hooks/useCounter.tsx) | Normal トランザクション |
 
-## デバッグ
+## 環境変数
 
-ブラウザコンソールでボックス形式のログが出力される。
+```bash
+# .env.local
 
-```text
-┌─ Normal Transaction ─────────────────────────┐
-│  1. Build:                  0ms            │
-│  2. Sign+Execute:        7755ms  ⏱️ user  │
-│  3. Invalidate:           109ms            │
-├──────────────────────────────────────────────┤
-│  System time only:        109ms            │
-└──────────────────────────────────────────────┘
+# Enoki Sponsored 用
+NEXT_PUBLIC_ENOKI_API_KEY=enoki_public_xxx
+ENOKI_SECRET_KEY=enoki_private_xxx
 
-┌─ Pre-allocated 1RT Transaction ──────────────┐
-│  1. Build (with coin):      50ms            │
-│  2. Sign:                 3000ms  ⏱️ user  │
-│  3. Execute (1RT):         300ms            │
-│  4. Wait for tx:           250ms            │
-├──────────────────────────────────────────────┤
-│  System time only:         600ms            │
-└──────────────────────────────────────────────┘
-
-┌─ Enoki Sponsored Transaction ────────────────┐
-│  1. Build:                217ms            │
-│  2. Sponsor (POST):      1001ms            │
-│  3. Sign:                3243ms  ⏱️ user  │
-│  4. Execute (PUT):       3196ms            │
-│  5. Wait for tx:          219ms            │
-├──────────────────────────────────────────────┤
-│  System time only:       4633ms            │
-└──────────────────────────────────────────────┘
+# 1RT Pre-allocated 用
+SPONSOR_PRIVATE_KEY=suiprivkey1xxx
 ```
 
 ## 参考

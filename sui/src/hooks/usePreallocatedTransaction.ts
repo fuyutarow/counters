@@ -95,6 +95,10 @@ export function usePreallocatedTransaction(
         },
       ]);
 
+      // Set explicit gas budget to avoid dryRun RPC call
+      // 10_000_000 MIST = 0.01 SUI (sufficient for most operations)
+      transaction.setGasBudget(10_000_000n);
+
       // Debug: Log sender and gasOwner
       consola.info("[Prealloc] Transaction config", {
         sender: account.address,

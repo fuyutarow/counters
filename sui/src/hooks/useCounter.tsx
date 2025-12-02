@@ -6,7 +6,13 @@
  * React hooks rulesに準拠した設計
  */
 
-import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from "@mysten/dapp-kit";
+import { toBase64 } from "@mysten/bcs";
+import {
+  useCurrentAccount,
+  useCurrentWallet,
+  useSignAndExecuteTransaction,
+  useSuiClient,
+} from "@mysten/dapp-kit";
 import { type SuiObjectChange } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -85,6 +91,7 @@ const showTxSuccessToast = (message: string, digest: string) => {
 
 export function useCounter() {
   const suiClient = useSuiClient();
+  const { currentWallet } = useCurrentWallet();
   const { mutateAsync: executeTransaction } = useSignAndExecuteTransaction({
     execute: async ({ bytes, signature }) => {
       const executionResult = await suiClient.executeTransactionBlock({
@@ -148,52 +155,83 @@ export function useCounter() {
         throw new Error("No account connected");
       }
 
+      const signFeature = currentWallet?.features["sui:signTransaction"];
+      if (!signFeature) {
+        throw new Error("Current wallet cannot sign transactions");
+      }
+
       const totalStart = performance.now();
 
-      // Step 1: Build transaction commands (no RPC)
+      // Step 1: Build transaction (includes object resolution RPC)
       const buildStart = performance.now();
       const tx = new Transaction();
       ownedCounter.increment({
         package: counterPackageId,
         arguments: [tx.object(counterId)],
       })(tx);
+      tx.setSender(account.address);
+      // Note: build() triggers RPC for object resolution + gas estimation
+      const txBytes = await tx.build({ client: suiClient });
       const buildTime = performance.now() - buildStart;
 
-      // Step 1.5: DryRun (explicit RPC call for comparison)
-      // Need to set sender for build() to work
-      tx.setSender(account.address);
-      const dryRunStart = performance.now();
-      await tx.build({ client: suiClient });
-      const dryRunTime = performance.now() - dryRunStart;
+      // Step 2: Sign (user approval wait)
+      const signStart = performance.now();
+      const signResponse = await signFeature.signTransaction({
+        transaction: {
+          toJSON: async () => toBase64(txBytes),
+        },
+        account,
+        chain: "sui:testnet",
+      });
+      if (!signResponse?.signature) {
+        throw new Error("Failed to sign transaction");
+      }
+      const signTime = performance.now() - signStart;
 
-      // Step 2: Sign & Execute (includes user approval wait)
-      // Note: Wallet will re-build internally, so this measures wallet overhead + user time
+      // Step 3: Execute transaction (RPC call)
       const executeStart = performance.now();
-      const result = await executeTransaction({ transaction: tx });
+      const executionResult = await suiClient.executeTransactionBlock({
+        transactionBlock: txBytes,
+        signature: signResponse.signature,
+        options: {
+          showRawEffects: true,
+          showObjectChanges: true,
+        },
+        requestType: "WaitForLocalExecution",
+      });
       const executeTime = performance.now() - executeStart;
 
-      // Step 3: Invalidate queries
-      const invalidateStart = performance.now();
+      // Step 4: Wait for confirmation
+      const waitStart = performance.now();
+      const result = await suiClient.waitForTransaction({
+        digest: executionResult.digest,
+        options: {
+          showRawEffects: true,
+          showObjectChanges: true,
+        },
+      });
+      const waitTime = performance.now() - waitStart;
+
+      // Invalidate queries (not included in System time - app-specific)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["counter", counterId] }),
         queryClient.invalidateQueries({ queryKey: ["owned-counters"] }),
       ]);
-      const invalidateTime = performance.now() - invalidateStart;
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + dryRunTime + invalidateTime; // Sign&Executeはユーザー操作含むので除外
+      const systemTime = buildTime + executeTime + waitTime;
 
       consola.box(
         `┌─ Normal Transaction ─────────────────────────┐
 │                                              │
-│  1. Build (commands):   ${buildTime.toFixed(0).padStart(5)}ms            │
-│  2. DryRun (RPC):       ${dryRunTime.toFixed(0).padStart(5)}ms            │
-│  3. Sign+Execute:       ${executeTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  4. Invalidate:         ${invalidateTime.toFixed(0).padStart(5)}ms            │
+│  1. Build (resolve+gas): ${buildTime.toFixed(0).padStart(5)}ms            │
+│  2. Sign:                ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  3. Execute:             ${executeTime.toFixed(0).padStart(5)}ms            │
+│  4. Wait for tx:         ${waitTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
-│  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
-│  System time only:      ${systemTime.toFixed(0).padStart(5)}ms            │
+│  Total (wall clock):     ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:       ${systemTime.toFixed(0).padStart(5)}ms            │
 │  (excludes user approval wait)               │
 └──────────────────────────────────────────────┘`,
       );
@@ -261,43 +299,86 @@ export function useCounter() {
   const incrementSharedCounter = useMutation({
     mutationKey: ["counter", "shared", "increment"],
     mutationFn: async (counterId: string): Promise<void> => {
+      if (!account?.address) {
+        throw new Error("No account connected");
+      }
+
+      const signFeature = currentWallet?.features["sui:signTransaction"];
+      if (!signFeature) {
+        throw new Error("Current wallet cannot sign transactions");
+      }
+
       const totalStart = performance.now();
 
-      // Step 1: Build transaction
+      // Step 1: Build transaction (includes object resolution RPC)
       const buildStart = performance.now();
       const tx = new Transaction();
       sharedCounter.increment({
         package: counterPackageId,
         arguments: [tx.object(counterId)],
       })(tx);
+      tx.setSender(account.address);
+      const txBytes = await tx.build({ client: suiClient });
       const buildTime = performance.now() - buildStart;
 
-      // Step 2: Sign & Execute (includes user approval wait)
+      // Step 2: Sign (user approval wait)
+      const signStart = performance.now();
+      const signResponse = await signFeature.signTransaction({
+        transaction: {
+          toJSON: async () => toBase64(txBytes),
+        },
+        account,
+        chain: "sui:testnet",
+      });
+      if (!signResponse?.signature) {
+        throw new Error("Failed to sign transaction");
+      }
+      const signTime = performance.now() - signStart;
+
+      // Step 3: Execute transaction (RPC call)
       const executeStart = performance.now();
-      const result = await executeTransaction({ transaction: tx });
+      const executionResult = await suiClient.executeTransactionBlock({
+        transactionBlock: txBytes,
+        signature: signResponse.signature,
+        options: {
+          showRawEffects: true,
+          showObjectChanges: true,
+        },
+        requestType: "WaitForLocalExecution",
+      });
       const executeTime = performance.now() - executeStart;
 
-      // Step 3: Invalidate queries
-      const invalidateStart = performance.now();
+      // Step 4: Wait for confirmation
+      const waitStart = performance.now();
+      const result = await suiClient.waitForTransaction({
+        digest: executionResult.digest,
+        options: {
+          showRawEffects: true,
+          showObjectChanges: true,
+        },
+      });
+      const waitTime = performance.now() - waitStart;
+
+      // Invalidate queries (not included in System time - app-specific)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["counter", counterId] }),
         queryClient.invalidateQueries({ queryKey: ["shared-counters"] }),
       ]);
-      const invalidateTime = performance.now() - invalidateStart;
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + invalidateTime; // Sign&Executeはユーザー操作含むので除外
+      const systemTime = buildTime + executeTime + waitTime;
 
       consola.box(
         `┌─ Normal Transaction (Shared) ────────────────┐
 │                                              │
-│  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
-│  2. Sign+Execute:       ${executeTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  3. Invalidate:         ${invalidateTime.toFixed(0).padStart(5)}ms            │
+│  1. Build (resolve+gas): ${buildTime.toFixed(0).padStart(5)}ms            │
+│  2. Sign:                ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  3. Execute:             ${executeTime.toFixed(0).padStart(5)}ms            │
+│  4. Wait for tx:         ${waitTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
-│  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
-│  System time only:      ${systemTime.toFixed(0).padStart(5)}ms            │
+│  Total (wall clock):     ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:       ${systemTime.toFixed(0).padStart(5)}ms            │
 │  (excludes user approval wait)               │
 └──────────────────────────────────────────────┘`,
       );

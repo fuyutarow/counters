@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CounterDisplay } from "@/components/CounterDisplay";
 import * as sharedCounter from "@/generated/counter/shared_counter";
 import { useCounter, useCounterValue } from "@/hooks/useCounter";
+import { usePreallocatedTransaction } from "@/hooks/usePreallocatedTransaction";
 import { useSponsoredTransaction } from "@/hooks/useSponsoredTransaction";
 import { useNetworkVariable } from "@/networkConfig";
 
@@ -20,7 +21,7 @@ export function SharedCounter({ id }: SharedCounterProps) {
   // Type-safe data fetching for shared counters only
   const { data, isLoading, error, refetch } = useCounterValue(id);
 
-  // Sponsored transaction hook
+  // Enoki sponsored transaction hook
   const sponsoredTx = useSponsoredTransaction({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["counter", id] });
@@ -29,9 +30,17 @@ export function SharedCounter({ id }: SharedCounterProps) {
     },
   });
 
+  // Pre-allocated 1RT transaction hook
+  const preallocTx = usePreallocatedTransaction({
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
   // Shared counter operations
   const isIncrementing = counter.shared.isPending.increment;
   const isSponsoredIncrementing = sponsoredTx.isPending;
+  const isPreallocIncrementing = preallocTx.isPending;
   const isSettingValue = counter.shared.isPending.setValue;
 
   const handleIncrement = async () => {
@@ -48,6 +57,15 @@ export function SharedCounter({ id }: SharedCounterProps) {
     await sponsoredTx.mutateAsync(tx);
   };
 
+  const handleIncrementPrealloc = async () => {
+    const tx = new Transaction();
+    sharedCounter.increment({
+      package: counterPackageId,
+      arguments: [tx.object(id)],
+    })(tx);
+    await preallocTx.mutateAsync(tx);
+  };
+
   const handleSetValue = async (value: number) => {
     await counter.shared.setValue({ counterId: id, value: BigInt(value) });
     refetch();
@@ -61,11 +79,14 @@ export function SharedCounter({ id }: SharedCounterProps) {
       isLoading={isLoading}
       isIncrementing={isIncrementing}
       isSponsoredIncrementing={isSponsoredIncrementing}
+      isPreallocIncrementing={isPreallocIncrementing}
       isSettingValue={isSettingValue}
       onIncrement={handleIncrement}
       onIncrementSponsored={handleIncrementSponsored}
+      onIncrementPrealloc={handleIncrementPrealloc}
       onSetValue={handleSetValue}
       error={error}
+      hasAllocation={preallocTx.hasAllocation}
     />
   );
 }
