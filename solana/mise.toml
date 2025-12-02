@@ -16,20 +16,20 @@ gas_budget = "100000000"
 # ===============================================
 
 [tasks.dev]
-description = "開発環境の完全セットアップ"
+description = "フロントエンド開発サーバーの起動"
 alias = "d"
-depends = [
-    "localnode:start",
-    "localnode:wait",
-    "wallet:setup",
-    "deploy",
-    "ui:dev",
-]
+run = "bun run dev"
 
 [tasks.build]
-description = "全プログラムのビルド"
+description = "プロジェクト全体のビルド"
 alias = "b"
-depends = ["build:programs"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+{{mise_bin}} run build:programs
+{{mise_bin}} run codegen
+{{mise_bin}} run build:ui
+'''
 
 [tasks.deploy]
 description = "全プログラムのデプロイ"
@@ -152,8 +152,9 @@ description = "バックエンドのみ（バリデータ + デプロイ）"
 depends = ["localnode:start", "localnode:wait", "wallet:setup", "deploy"]
 
 [tasks."dev:full"]
-description = "フル開発セットアップ（ゼロから）"
-depends = ["install", "dev"]
+description = "開発環境の完全セットアップ（ローカルノード + デプロイ + UI）"
+alias = "df"
+depends = ["localnode:start", "localnode:wait", "wallet:setup", "deploy", "dev"]
 
 [tasks."wallet:setup"]
 description = "ウォレットの完全セットアップ"
@@ -449,15 +450,6 @@ echo "   shared_counter: $(solana address -k target/deploy/shared_counter-keypai
 [tasks."install:ui"]
 description = "UI依存関係のみインストール"
 run = '''bun install'''
-
-[tasks."dev:ui"]
-description = "UI開発サーバーのみ起動"
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-echo "🌐 フロントエンド開発サーバー起動中..."
-bun run dev
-'''
 
 [tasks."build:ui"]
 description = "UIのみビルド"

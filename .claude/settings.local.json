@@ -18,7 +18,16 @@
       "Bash(bun run check:*)",
       "Bash(sui client:*)",
       "Bash(mise run:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(solana config:*)",
+      "Bash(solana address:*)",
+      "Bash(solana balance:*)",
+      "Bash(solana airdrop:*)",
+      "Bash(solana program close:*)",
+      "Bash(solana-keygen new:*)",
+      "Bash(anchor deploy:*)",
+      "Bash(anchor run:*)",
+      "Bash(node -e:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,9 +1,12 @@
 "use client";
 
+import * as anchor from "@coral-xyz/anchor";
 import { ExternalLink } from "lucide-react";
 import { CounterDisplay } from "@/components/CounterDisplay";
 import { Card, CardContent } from "@/components/ui/card";
 import { useCounter, useOwnedCounterValue } from "@/hooks/useCounter";
+import { useProgram } from "@/hooks/useProgram";
+import { useSponsoredTransaction } from "@/hooks/useSponsoredTransaction";
 
 interface OwnedCounterProps {
   id: string;
@@ -11,17 +14,43 @@ interface OwnedCounterProps {
 
 export function OwnedCounter({ id }: OwnedCounterProps) {
   const counter = useCounter();
+  const { ownedCounterProgram, publicKey } = useProgram();
 
   // Type-safe data fetching for owned counters only
   const { data, isLoading, error, refetch } = useOwnedCounterValue(id);
 
+  // Sponsored transaction hook (1RT)
+  const sponsoredTx = useSponsoredTransaction({
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
   // Owned counter operations
   const isIncrementing = counter.owned.isPending.increment;
+  const isSponsoredIncrementing = sponsoredTx.isPending;
   const isSettingValue = counter.owned.isPending.setValue;
 
   const handleIncrement = async () => {
     await counter.owned.increment(id);
     refetch();
+  };
+
+  const handleIncrementSponsored = async () => {
+    if (!ownedCounterProgram || !publicKey) {
+      throw new Error("Program or wallet not available");
+    }
+
+    // Build instruction for sponsored transaction
+    const instruction = await ownedCounterProgram.methods
+      .increment()
+      .accountsPartial({
+        counter: new anchor.web3.PublicKey(id),
+        owner: publicKey,
+      })
+      .instruction();
+
+    await sponsoredTx.mutateAsync([instruction]);
   };
 
   const handleSetValue = async (value: number) => {
@@ -70,10 +99,13 @@ export function OwnedCounter({ id }: OwnedCounterProps) {
       value={data?.value ?? ""}
       isLoading={isLoading}
       isIncrementing={isIncrementing}
+      isSponsoredIncrementing={isSponsoredIncrementing}
       isSettingValue={isSettingValue}
       onIncrement={handleIncrement}
+      onIncrementSponsored={handleIncrementSponsored}
       onSetValue={handleSetValue}
       error={error}
+      hasSponsor={sponsoredTx.hasSponsor}
       {...(data?.owner && { owner: data.owner })}
     />
   );

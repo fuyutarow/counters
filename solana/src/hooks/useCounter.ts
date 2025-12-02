@@ -2,6 +2,7 @@
 
 import * as anchor from "@coral-xyz/anchor";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import consola from "consola";
 import { toast } from "sonner";
 import { useProgram } from "./useProgram";
 
@@ -107,13 +108,74 @@ export function useCounter() {
         throw new Error("Program or wallet not available");
       }
 
-      const signature = await ownedCounterProgram.methods
+      const provider = ownedCounterProgram.provider as anchor.AnchorProvider;
+      const totalStart = performance.now();
+
+      // Step 1: Get recent blockhash
+      const blockhashStart = performance.now();
+      const { blockhash, lastValidBlockHeight } =
+        await ownedCounterProgram.provider.connection.getLatestBlockhash("confirmed");
+      const blockhashTime = performance.now() - blockhashStart;
+      consola.info(`[Normal Owned] 1. Get blockhash: ${blockhashTime.toFixed(0)}ms`);
+
+      // Step 2: Build transaction
+      const buildStart = performance.now();
+      const tx = await ownedCounterProgram.methods
         .increment()
         .accountsPartial({
           counter: new anchor.web3.PublicKey(counterId),
           owner: publicKey,
         })
-        .rpc();
+        .transaction();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = publicKey;
+      const buildTime = performance.now() - buildStart;
+      consola.info(`[Normal Owned] 2. Build tx: ${buildTime.toFixed(0)}ms`);
+
+      // Step 3: Sign (user approval)
+      const signStart = performance.now();
+      const signedTx = await provider.wallet.signTransaction(tx);
+      const signTime = performance.now() - signStart;
+      consola.info(`[Normal Owned] 3. Sign (wallet): ${signTime.toFixed(0)}ms`);
+
+      // Step 4: POST to RPC (submit transaction)
+      const postStart = performance.now();
+      const signature = await ownedCounterProgram.provider.connection.sendRawTransaction(
+        signedTx.serialize(),
+      );
+      const postTime = performance.now() - postStart;
+      consola.info(`[Normal Owned] 4. POST to RPC: ${postTime.toFixed(0)}ms`);
+
+      // Step 5: Finalize (wait for confirmation)
+      const finalizeStart = performance.now();
+      await ownedCounterProgram.provider.connection.confirmTransaction(
+        {
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        },
+        "confirmed",
+      );
+      const finalizeTime = performance.now() - finalizeStart;
+      consola.info(`[Normal Owned] 5. Finalize: ${finalizeTime.toFixed(0)}ms`);
+
+      const totalTime = performance.now() - totalStart;
+      const systemTime = blockhashTime + buildTime + postTime + finalizeTime;
+
+      consola.box(
+        `┌─ Normal Transaction (Owned) ─────────────────┐
+│                                              │
+│  1. Get blockhash:        ${blockhashTime.toFixed(0).padStart(5)}ms            │
+│  2. Build tx:             ${buildTime.toFixed(0).padStart(5)}ms            │
+│  3. Sign (wallet):        ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  4. POST to RPC:          ${postTime.toFixed(0).padStart(5)}ms            │
+│  5. Finalize:             ${finalizeTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):      ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:        ${systemTime.toFixed(0).padStart(5)}ms            │
+└──────────────────────────────────────────────┘`,
+      );
 
       showTxSuccessToast("Counter incremented successfully!", signature);
       await Promise.all([
@@ -122,6 +184,7 @@ export function useCounter() {
       ]);
     },
     onError: (error) => {
+      consola.error(`[Normal Owned] Error: ${error.message}`);
       toast.error("Failed to increment counter", {
         description: error.message,
       });
@@ -201,13 +264,74 @@ export function useCounter() {
         throw new Error("Program or wallet not available");
       }
 
-      const signature = await sharedCounterProgram.methods
+      const provider = sharedCounterProgram.provider as anchor.AnchorProvider;
+      const totalStart = performance.now();
+
+      // Step 1: Get recent blockhash
+      const blockhashStart = performance.now();
+      const { blockhash, lastValidBlockHeight } =
+        await sharedCounterProgram.provider.connection.getLatestBlockhash("confirmed");
+      const blockhashTime = performance.now() - blockhashStart;
+      consola.info(`[Normal Shared] 1. Get blockhash: ${blockhashTime.toFixed(0)}ms`);
+
+      // Step 2: Build transaction
+      const buildStart = performance.now();
+      const tx = await sharedCounterProgram.methods
         .increment()
         .accountsPartial({
           counter: new anchor.web3.PublicKey(counterId),
           caller: publicKey,
         })
-        .rpc();
+        .transaction();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = publicKey;
+      const buildTime = performance.now() - buildStart;
+      consola.info(`[Normal Shared] 2. Build tx: ${buildTime.toFixed(0)}ms`);
+
+      // Step 3: Sign (user approval)
+      const signStart = performance.now();
+      const signedTx = await provider.wallet.signTransaction(tx);
+      const signTime = performance.now() - signStart;
+      consola.info(`[Normal Shared] 3. Sign (wallet): ${signTime.toFixed(0)}ms`);
+
+      // Step 4: POST to RPC (submit transaction)
+      const postStart = performance.now();
+      const signature = await sharedCounterProgram.provider.connection.sendRawTransaction(
+        signedTx.serialize(),
+      );
+      const postTime = performance.now() - postStart;
+      consola.info(`[Normal Shared] 4. POST to RPC: ${postTime.toFixed(0)}ms`);
+
+      // Step 5: Finalize (wait for confirmation)
+      const finalizeStart = performance.now();
+      await sharedCounterProgram.provider.connection.confirmTransaction(
+        {
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        },
+        "confirmed",
+      );
+      const finalizeTime = performance.now() - finalizeStart;
+      consola.info(`[Normal Shared] 5. Finalize: ${finalizeTime.toFixed(0)}ms`);
+
+      const totalTime = performance.now() - totalStart;
+      const systemTime = blockhashTime + buildTime + postTime + finalizeTime;
+
+      consola.box(
+        `┌─ Normal Transaction (Shared) ────────────────┐
+│                                              │
+│  1. Get blockhash:        ${blockhashTime.toFixed(0).padStart(5)}ms            │
+│  2. Build tx:             ${buildTime.toFixed(0).padStart(5)}ms            │
+│  3. Sign (wallet):        ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  4. POST to RPC:          ${postTime.toFixed(0).padStart(5)}ms            │
+│  5. Finalize:             ${finalizeTime.toFixed(0).padStart(5)}ms            │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total (wall clock):      ${totalTime.toFixed(0).padStart(5)}ms            │
+│  System time only:        ${systemTime.toFixed(0).padStart(5)}ms            │
+└──────────────────────────────────────────────┘`,
+      );
 
       showTxSuccessToast("Shared counter incremented successfully!", signature);
       await Promise.all([
@@ -216,6 +340,7 @@ export function useCounter() {
       ]);
     },
     onError: (error) => {
+      consola.error(`[Normal Shared] Error: ${error.message}`);
       toast.error("Failed to increment shared counter", {
         description: error.message,
       });

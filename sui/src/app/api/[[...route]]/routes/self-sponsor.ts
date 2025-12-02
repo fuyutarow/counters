@@ -431,6 +431,9 @@ export const selfSponsorRoutes = new Hono()
     const sponsorSignature = signResult.value.signature;
 
     // Step 2: Execute with both signatures (1RT - single API call!)
+    // Note: Do NOT use WaitForLocalExecution here.
+    // Client should handle waiting via waitForTransaction.
+    // Server only submits and returns digest immediately.
     const executeStart = performance.now();
     const executeResult = await ResultAsync.fromPromise(
       suiClient.executeTransactionBlock({
@@ -439,7 +442,6 @@ export const selfSponsorRoutes = new Hono()
         options: {
           showEffects: true,
         },
-        requestType: "WaitForLocalExecution",
       }),
       (e) => (e instanceof Error ? e : new Error("Failed to execute transaction")),
     );

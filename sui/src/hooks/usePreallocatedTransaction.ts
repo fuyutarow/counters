@@ -163,11 +163,11 @@ export function usePreallocatedTransaction(
       }
 
       const executionResult = (await executeResponse.json()) as { digest: string };
-      const executeTime = performance.now() - executeStart;
-      consola.info(`[Prealloc] 3. Execute tx (API - 1RT): ${executeTime.toFixed(0)}ms`);
+      const postTime = performance.now() - executeStart;
+      consola.info(`[Prealloc] 3. POST to API (1RT): ${postTime.toFixed(0)}ms`);
 
-      // Step 4: Wait for transaction
-      const waitStart = performance.now();
+      // Step 4: Finalize (wait for transaction confirmation)
+      const finalizeStart = performance.now();
       const result = await client.waitForTransaction({
         digest: executionResult.digest,
         options: {
@@ -176,8 +176,8 @@ export function usePreallocatedTransaction(
           showEvents: true,
         },
       });
-      const waitTime = performance.now() - waitStart;
-      consola.info(`[Prealloc] 4. Wait for transaction: ${waitTime.toFixed(0)}ms`);
+      const finalizeTime = performance.now() - finalizeStart;
+      consola.info(`[Prealloc] 4. Finalize: ${finalizeTime.toFixed(0)}ms`);
 
       if (result.effects?.status?.status !== "success") {
         throw new Error(`Transaction failed: ${result.effects?.status?.error || "Unknown error"}`);
@@ -187,15 +187,15 @@ export function usePreallocatedTransaction(
       await refreshCoin();
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + executeTime + waitTime;
+      const systemTime = buildTime + postTime + finalizeTime;
 
       consola.box(
         `┌─ Pre-allocated 1RT Transaction ──────────────┐
 │                                              │
 │  1. Build (with coin):    ${buildTime.toFixed(0).padStart(5)}ms            │
 │  2. Sign:                 ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  3. Execute (1RT):        ${executeTime.toFixed(0).padStart(5)}ms            │
-│  4. Wait for tx:          ${waitTime.toFixed(0).padStart(5)}ms            │
+│  3. POST to API (1RT):    ${postTime.toFixed(0).padStart(5)}ms            │
+│  4. Finalize:             ${finalizeTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total (wall clock):      ${totalTime.toFixed(0).padStart(5)}ms            │
