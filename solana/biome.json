@@ -104,7 +104,7 @@
     "includes": [
       "src/**/*.{js,jsx,ts,tsx,json}",
       "scripts/**/*.{js,ts,mjs,mts,json}",
-      "tests/**/*.{js,jsx,ts,tsx,json}",
+      "__tests__/**/*.{js,jsx,ts,tsx,json}",
       "*.{js,jsx,ts,tsx,json}",
       "!**/node_modules",
       "!**/dist",
@@ -122,5 +122,24 @@
       "!**/.next-dev",
       "!src/graphql/generated.ts"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/generated/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off",
+            "noImplicitAnyLet": "off"
+          },
+          "complexity": {
+            "noBannedTypes": "off"
+          }
+        }
+      }
+    }
+  ]
 }

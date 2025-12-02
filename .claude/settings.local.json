@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/bin/grep -E ^next@)",
+      "Bash(/bin/grep:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

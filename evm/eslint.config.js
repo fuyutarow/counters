@@ -75,7 +75,6 @@ export default [
 
       "@typescript-eslint/no-explicit-any": "error",
 
-      // Console rules - consolaライブラリ使用を推奨
       "prefer-const": "error",
     },
   },
@@ -138,6 +137,7 @@ export default [
       "**/*.d.ts",
       "contracts/**",
       "src/abi/generated.ts",
+      "src/generated/**",
     ],
   },
 ];

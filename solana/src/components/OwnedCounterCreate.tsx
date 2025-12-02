@@ -14,11 +14,10 @@ export function OwnedCounterCreate() {
 
   const isCreating = counter.owned.isPending.create;
 
-  const handleCreate = async () => {
-    try {
-      const counterId = await counter.owned.create();
+  const handleCreate = () => {
+    counter.owned.create().then((counterId) => {
       router.push(`/owned-counter/${counterId}`);
-    } catch (_error) {}
+    });
   };
 
   if (!isConnected) {

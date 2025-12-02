@@ -23,39 +23,39 @@ export function useCounterValue(counterId?: string, type: "owned" | "shared" = "
     queryFn: async () => {
       if (!counterId) return null;
 
-      try {
-        if (type === "owned" && ownedCounterProgram) {
-          const counterPubkey = new anchor.web3.PublicKey(counterId);
-          const account = await ownedCounterProgram.account.ownedCounter.fetch(counterPubkey);
-          if (!account) throw new Error("Failed to fetch owned counter account");
+      if (type === "owned" && ownedCounterProgram) {
+        const counterPubkey = new anchor.web3.PublicKey(counterId);
+        const account = await ownedCounterProgram.account.ownedCounter
+          .fetch(counterPubkey)
+          .catch(() => null);
+        if (!account) return null;
 
-          return {
-            id: counterId,
-            value: account.value.toString(),
-            owner: account.owner.toString(),
-            creator: undefined,
-            seed: account.seed.toString(),
-            type,
-          };
-        }
-        if (type === "shared" && sharedCounterProgram) {
-          const counterPubkey = new anchor.web3.PublicKey(counterId);
-          const account = await sharedCounterProgram.account.sharedCounter.fetch(counterPubkey);
-          if (!account) throw new Error("Failed to fetch shared counter account");
-
-          return {
-            id: counterId,
-            value: account.value.toString(),
-            owner: undefined,
-            seed: account.id.toString(),
-            type,
-          };
-        }
-
-        return null;
-      } catch (_error) {
-        return null;
+        return {
+          id: counterId,
+          value: account.value.toString(),
+          owner: account.owner.toString(),
+          creator: undefined,
+          seed: account.seed.toString(),
+          type,
+        };
       }
+      if (type === "shared" && sharedCounterProgram) {
+        const counterPubkey = new anchor.web3.PublicKey(counterId);
+        const account = await sharedCounterProgram.account.sharedCounter
+          .fetch(counterPubkey)
+          .catch(() => null);
+        if (!account) return null;
+
+        return {
+          id: counterId,
+          value: account.value.toString(),
+          owner: undefined,
+          seed: account.id.toString(),
+          type,
+        };
+      }
+
+      return null;
     },
     enabled: !!counterId && !!(type === "owned" ? ownedCounterProgram : sharedCounterProgram),
   });
@@ -284,18 +284,14 @@ export function useOwnedCountersList() {
     queryFn: async () => {
       if (!ownedCounterProgram) return [];
 
-      try {
-        const accounts = await ownedCounterProgram.account.ownedCounter.all();
-        return accounts.map(({ publicKey, account }) => ({
-          id: publicKey.toString(),
-          value: account.value.toString(),
-          owner: account.owner.toString(),
-          seed: account.seed.toString(),
-          type: "owned" as const,
-        }));
-      } catch (_error) {
-        return [];
-      }
+      const accounts = await ownedCounterProgram.account.ownedCounter.all().catch(() => []);
+      return accounts.map(({ publicKey, account }) => ({
+        id: publicKey.toString(),
+        value: account.value.toString(),
+        owner: account.owner.toString(),
+        seed: account.seed.toString(),
+        type: "owned" as const,
+      }));
     },
     enabled: !!ownedCounterProgram,
   });
@@ -309,17 +305,13 @@ export function useSharedCountersList() {
     queryFn: async () => {
       if (!sharedCounterProgram) return [];
 
-      try {
-        const accounts = await sharedCounterProgram.account.sharedCounter.all();
-        return accounts.map(({ publicKey, account }) => ({
-          id: publicKey.toString(),
-          value: account.value.toString(),
-          seed: account.id.toString(),
-          type: "shared" as const,
-        }));
-      } catch (_error) {
-        return [];
-      }
+      const accounts = await sharedCounterProgram.account.sharedCounter.all().catch(() => []);
+      return accounts.map(({ publicKey, account }) => ({
+        id: publicKey.toString(),
+        value: account.value.toString(),
+        seed: account.id.toString(),
+        type: "shared" as const,
+      }));
     },
     enabled: !!sharedCounterProgram,
   });

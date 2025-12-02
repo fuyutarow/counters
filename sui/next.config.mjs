@@ -6,8 +6,9 @@ const nextConfig = {
     optimizePackageImports: ["@mysten/dapp-kit"],
   },
   transpilePackages: ["@mysten/dapp-kit"],
-  webpack: (config, { isServer, nextRuntime }) => {
-    config.externals.push("pino-pretty", "lokijs", "encoding");
+  // Next.js 15: Server Components bundlingから除外するパッケージ
+  serverExternalPackages: ["pino-pretty", "lokijs", "encoding"],
+  webpack: (config, { nextRuntime }) => {
 
     // Skip WASM handling for edge runtime
     if (nextRuntime === 'edge') {

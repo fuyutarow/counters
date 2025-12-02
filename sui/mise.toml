@@ -111,14 +111,13 @@ echo "📦 古いパッケージをチェック中..."
 bun outdated
 echo ""
 echo "📦 package.jsonを最新バージョンに更新中..."
-bunx npm-check-updates -u
+bunx npm-check-updates -u --reject next
 echo ""
 echo "📦 更新された依存関係をインストール中..."
 bun install
-echo ""
-echo "📦 Biome設定をマイグレーション中..."
-bunx @biomejs/biome migrate --write
 echo "✅ 依存関係を最新バージョンに更新完了！"
+echo "ℹ️  next は自動更新から除外されています"
+bunx @biomejs/biome migrate --write
 '''
 
 # ===============================================
