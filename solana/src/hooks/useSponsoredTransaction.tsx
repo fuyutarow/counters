@@ -138,15 +138,15 @@ export function useSponsoredTransaction(options?: SponsoredTransactionOptions) {
         signature: string;
         success: boolean;
       };
-      const executeTime = performance.now() - executeStart;
-      consola.info(`[Sponsored] 4. Execute (API - 1RT): ${executeTime.toFixed(0)}ms`);
+      const postTime = performance.now() - executeStart;
+      consola.info(`[Sponsored] 4. POST to API (1RT): ${postTime.toFixed(0)}ms`);
 
       if (!success) {
         throw new Error("Transaction execution failed");
       }
 
-      // Step 5: Wait for confirmation (optional - backend already confirms)
-      const waitStart = performance.now();
+      // Step 5: Finalize (wait for confirmation on client)
+      const finalizeStart = performance.now();
       await connection.confirmTransaction(
         {
           signature,
@@ -155,11 +155,11 @@ export function useSponsoredTransaction(options?: SponsoredTransactionOptions) {
         },
         "confirmed",
       );
-      const waitTime = performance.now() - waitStart;
-      consola.info(`[Sponsored] 5. Wait for tx: ${waitTime.toFixed(0)}ms`);
+      const finalizeTime = performance.now() - finalizeStart;
+      consola.info(`[Sponsored] 5. Finalize: ${finalizeTime.toFixed(0)}ms`);
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = blockhashTime + buildTime + executeTime + waitTime;
+      const systemTime = blockhashTime + buildTime + postTime + finalizeTime;
 
       consola.box(
         `┌─ Sponsored Transaction (1RT) ───────────────┐
@@ -167,8 +167,8 @@ export function useSponsoredTransaction(options?: SponsoredTransactionOptions) {
 │  1. Get blockhash:        ${blockhashTime.toFixed(0).padStart(5)}ms            │
 │  2. Build tx:             ${buildTime.toFixed(0).padStart(5)}ms            │
 │  3. User sign:            ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  4. Execute (1RT):        ${executeTime.toFixed(0).padStart(5)}ms            │
-│  5. Wait for tx:          ${waitTime.toFixed(0).padStart(5)}ms            │
+│  4. POST to API (1RT):    ${postTime.toFixed(0).padStart(5)}ms            │
+│  5. Finalize:             ${finalizeTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total (wall clock):      ${totalTime.toFixed(0).padStart(5)}ms            │

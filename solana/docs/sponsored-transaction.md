@@ -5,25 +5,44 @@
 Solana のスポンサードトランザクションは、ユーザーの代わりにスポンサー（バックエンド）がガス代を支払う仕組み。
 本プロジェクトでは Fee Payer パターンを実装している。
 
-## 本質的なオーバーヘッド
+## トランザクション処理の時間構成
 
-### Solana (Account Model)
+### 用語定義
 
-| 処理 | 理由 |
+| 用語 | 説明 |
 |------|------|
-| **Blockhash 取得 (RPC)** | 最新ブロックハッシュが必要（有効期限あり） |
-| **ユーザー署名** | セキュリティ上必須。ウォレット UI の表示時間含む |
-| **トランザクション実行 (RPC)** | RPC ノードへの送信・確定待ち |
+| **Get blockhash** | 最新ブロックハッシュ取得（RPC） |
+| **Build** | トランザクション構築 |
+| **Sign** | ユーザーのウォレット署名（⏱️ ユーザー操作待ち） |
+| **POST** | トランザクションを RPC/API に送信（= RTT） |
+| **Finalize** | トランザクション確定を待つ（`confirmTransaction`） |
 
-### Sui (UTXO-like Model) との違い
+### POST = RTT（Round Trip Time）
+
+POST の時間は **ネットワーク RTT** である：
+
+```text
+Client ──→ RPC Node / Backend ──→ Client
+       └──────── RTT ────────────┘
+```
+
+**環境による RTT の違い**:
+
+| 環境 | RTT | 理由 |
+|------|-----|------|
+| **localnet** | ~20-130ms | ローカル、ネットワーク遅延なし |
+| **devnet** | ~200-400ms | US リージョン |
+| **mainnet** | ~100-300ms (期待値) | リージョン選択可能（Helius, QuickNode 等） |
+
+### Solana vs Sui の構造的違い
 
 | 項目 | Solana | Sui |
 |------|--------|-----|
+| **モデル** | Account Model | UTXO-like Object Model |
 | **オブジェクト参照解決** | **不要** | 必須（objectId + version + digest） |
-| **ガス見積もり** | 自動 or 固定 | 必須 or setGasBudget |
-| **構造的複雑性** | 低い | 高い（UTXO モデル） |
+| **Build の複雑性** | 低い | 高い |
 
-**Solana の優位点**: Account Model のおかげで「オブジェクト参照解決」が不要。これにより構造的にシンプル。
+**Solana の優位点**: Account Model のおかげで「オブジェクト参照解決」が不要。Build がシンプルで高速。
 
 ## 2 方式の比較
 
@@ -31,16 +50,16 @@ Solana のスポンサードトランザクションは、ユーザーの代わ�
 Normal                 Fee Payer Sponsored (1RT)
 ──────────────────     ──────────────────────────
 [Get Blockhash]        [Get Blockhash]
-        ↓                      ↓
-[Sign+Execute (rpc)]   [Build tx (feePayer=sponsor)]
-        ↓                      ↓
-[Wait for tx]          [User partial sign]
-        ↓                      ↓
-      完了             [Backend sign + execute (1RT)]
-                               ↓
-                       [Wait for tx]
-                               ↓
-                             完了
+    ↓                      ↓
+[Build]                [Build (feePayer=sponsor)]
+    ↓                      ↓
+[Sign] ⏱️              [Sign (partial)] ⏱️
+    ↓                      ↓
+[POST to RPC]          [POST to Backend]
+    ↓                      ↓
+[Finalize]             [Finalize]
+    ↓                      ↓
+  完了                   完了
 ──────────────────     ──────────────────────────
 API往復: 0回           API往復: 1回
 ```
@@ -50,90 +69,97 @@ API往復: 0回           API往復: 1回
 | **Normal** | ユーザー負担 | 0 | 日常操作、高頻度 |
 | **Fee Payer Sponsored** | スポンサー負担 | 1 | ガス代ゼロ、オンボーディング |
 
-## 実測値
-
-### Solana (localnet)
-
-> **注意**: localnet での計測値。RPC 遅延がほぼゼロのため、devnet/mainnet では大幅に異なる。
+## 実測値 (localnet)
 
 ```text
 ┌─ Normal Transaction ─────────────────────────┐
-│  1. Get blockhash:          22ms             │
-│  2. Sign+Execute (rpc):   3899ms  ⏱️ user    │
-│  3. Wait for tx:            97ms             │
+│                                              │
+│  1. Get blockhash:         21ms              │
+│  2. Build tx:               0ms              │
+│  3. Sign:                4184ms  ⏱️ user     │
+│  4. POST to RPC:           20ms  ← RTT       │
+│  5. Finalize:             371ms              │
+│                                              │
 ├──────────────────────────────────────────────┤
-│  System time only:         118ms             │
+│  System time only:        412ms              │
 └──────────────────────────────────────────────┘
 
-┌─ Fee Payer Sponsored (1RT) ──────────────────┐
-│  1. Get blockhash:           8ms             │
-│  2. Build tx:                0ms             │
-│  3. User sign:            4406ms  ⏱️ user    │
-│  4. Execute (1RT):         481ms             │
-│  5. Wait for tx:           382ms             │
+┌─ Sponsored Transaction (1RT) ────────────────┐
+│                                              │
+│  1. Get blockhash:         18ms              │
+│  2. Build tx:               0ms              │
+│  3. Sign:                3650ms  ⏱️ user     │
+│  4. POST to API (1RT):    133ms  ← RTT×2     │
+│  5. Finalize:             389ms              │
+│                                              │
 ├──────────────────────────────────────────────┤
-│  System time only:         871ms             │
-└──────────────────────────────────────────────┘
-
-┌─ Backend 処理内訳 ───────────────────────────┐
-│  1. Deserialize:             1ms             │
-│  2. Sign (sponsor):          5ms             │
-│  3. Send tx:                 6ms             │
-│  4. Confirm tx:            384ms             │
-├──────────────────────────────────────────────┤
-│  Backend total:            407ms             │
+│  System time only:        540ms              │
 └──────────────────────────────────────────────┘
 ```
 
 ⏱️ = ユーザー操作待ち時間（System time から除外）
 
-### 時間収支 (MECE)
+### Backend 処理内訳
 
-| 処理 | 必須? | Normal | Sponsored |
-|------|-------|--------|-----------|
-| **Get Blockhash** | ✅ 必須 | 22ms | 8ms |
-| **Build tx** | ✅ 必須 | rpc内 | 0ms |
-| **ユーザー署名** | ✅ 必須 | ⏱️ ~3,900ms | ⏱️ ~4,400ms |
-| **API呼び出し (1RT)** | 方式依存 | - | 481ms |
-| **トランザクション確定** | ✅ 必須 | 97ms | 382ms |
-| **System time 合計** | | **118ms** | **871ms** |
+```text
+┌─ Fee-Sponsor Backend (1RT) ──────────────────┐
+│                                              │
+│  1. Deserialize:            0ms              │
+│  2. Sign (sponsor):         3ms              │
+│  3. Send tx:               17ms              │
+│                                              │
+├──────────────────────────────────────────────┤
+│  Total backend time:       23ms              │
+└──────────────────────────────────────────────┘
+```
 
-**Sponsored のオーバーヘッド**: 871ms - 118ms = **+753ms**
+### 時間収支
 
-内訳:
-- API 呼び出し + Backend 処理: ~481ms
-- 確定待ち時間の増加: ~285ms（2署名検証のため）
+| 処理 | Normal | Sponsored |
+|------|--------|-----------|
+| **Get blockhash** | 21ms | 18ms |
+| **Build** | 0ms | 0ms |
+| **Sign** | ⏱️ | ⏱️ |
+| **POST** | 20ms | 133ms |
+| **Finalize** | 371ms | 389ms |
+| **System time** | **412ms** | **540ms** |
 
-## Solana vs Sui 比較
+**結論**: Sponsored は Normal に比べて **約100-130ms のオーバーヘッド**。主な原因は API 経由での追加 RTT。
 
-### System Time 比較
+### devnet/mainnet での期待値
 
-| 方式 | Solana (localnet) | Sui (testnet) | 差分 |
-|------|-------------------|---------------|------|
-| **Normal** | 118ms | 3,642ms | Solana が **30x 高速** |
-| **Sponsored (1RT)** | 871ms | 3,594ms | Solana が **4x 高速** |
-| **Enoki (2RT)** | N/A | 4,197ms | Sui のみ |
+| 環境 | Normal | Sponsored |
+|------|--------|-----------|
+| **localnet** | ~400ms | ~500ms |
+| **devnet** | ~800-1,200ms | ~1,000-1,500ms |
+| **mainnet** (Asia RPC) | ~500-800ms | ~700-1,000ms |
 
-> ⚠️ **公平な比較ではない**: Solana は localnet（RPC 遅延ゼロ）、Sui は testnet（実際のネットワーク遅延あり）での計測。
+## 設計原則: Server submits, Client waits
 
-### 構造的な違い
+詳細は [Cloudflare Workers 考慮事項](../../docs/cloudflare-workers-considerations.md) を参照。
 
-| 項目 | Solana | Sui |
-|------|--------|-----|
-| **アカウントモデル** | Account Model | UTXO-like Object Model |
-| **オブジェクト参照** | 不要（アドレスのみ） | 必要（objectId + version + digest） |
-| **署名方式** | PartialSign + Fee Payer | GasOwner + Sender 分離 |
-| **Sponsored 方式** | Fee Payer (1RT) | 1RT Pre-allocated / Enoki (2RT) |
+```text
+┌─ Server ─────────────────┐     ┌─ Client ────────────────┐
+│ 1. Sign (sponsor)        │     │                         │
+│ 2. Send tx (POST)        │ ──→ │ 3. Finalize             │
+│ 3. Return signature      │     │    (confirmTransaction) │
+└──────────────────────────┘     └─────────────────────────┘
+```
 
-### アーキテクチャ上の示唆
+### Solana 固有の問題
 
-**Solana の利点**:
-- Account Model により「オブジェクト参照解決」ステップが不要
-- トランザクション構築がシンプル
+`@solana/web3.js` v1.x の `confirmTransaction` は内部で WebSocket を使用。Miniflare 環境と相性が悪い。
 
-**Sui の利点**:
-- UTXO モデルにより並列処理に優れる
-- オブジェクト単位の所有権管理
+**解決策**: Backend では `sendTransaction` のみ、`confirmTransaction` はクライアントで実行。
+
+```typescript
+// Backend
+const signature = await connection.sendTransaction(tx);
+return c.json({ signature, success: true });
+
+// Client
+await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight });
+```
 
 ## フロー詳細
 
@@ -153,42 +179,20 @@ sequenceDiagram
     W-->>C: userSignature
 
     C->>B: POST /execute (txBytes + userSig)
-    B->>B: Deserialize tx
-    B->>B: Validate programs (allowlist)
-    B->>B: Sign as fee payer (~5ms)
+    B->>B: Deserialize + Validate
+    B->>B: Sign as fee payer
     B->>S: Send transaction
-    S-->>S: (Solana Network 確定)
-    S-->>B: Result
+    S-->>B: signature
     B-->>C: signature
 
-    C->>S: Wait for tx confirmation
-```
-
-### Normal Transaction
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant W as Wallet
-    participant S as RPC Node
-
-    C->>S: Get recent blockhash
-    C->>C: Build tx (feePayer = user)
-    C->>W: Sign + Submit (via Anchor rpc())
-    Note over W: ⏱️ User approval
-    W->>S: Send signed transaction
-    S-->>S: (Solana Network 確定)
-    S-->>W: Result
-    W-->>C: signature
-
-    C->>S: Wait for tx confirmation
+    C->>S: confirmTransaction (Finalize)
 ```
 
 ## セキュリティ
 
 ### プログラム許可リスト
 
-スポンサーが署名する前に、トランザクションが許可されたプログラムのみを呼び出しているか検証する。
+スポンサーが署名する前に、許可されたプログラムのみを呼び出しているか検証。
 
 ```typescript
 const ALLOWED_PROGRAM_IDS = [
@@ -200,7 +204,7 @@ const ALLOWED_PROGRAM_IDS = [
 
 ### Fee Payer 検証
 
-トランザクションの fee payer がスポンサーの公開鍵と一致することを確認する。
+トランザクションの fee payer がスポンサーの公開鍵と一致することを確認。
 
 ## ユースケース判断
 
@@ -214,11 +218,9 @@ const ALLOWED_PROGRAM_IDS = [
 
 | ファイル | 役割 |
 |---------|------|
+| [useCounter.ts](../src/hooks/useCounter.ts) | Normal Transaction |
 | [useSponsoredTransaction.tsx](../src/hooks/useSponsoredTransaction.tsx) | Sponsored Transaction フック |
 | [fee-sponsor.ts](../src/app/api/[[...route]]/routes/fee-sponsor.ts) | バックエンド API |
-| [useCounter.ts](../src/hooks/useCounter.ts) | Normal Transaction |
-| [OwnedCounter.tsx](../src/components/OwnedCounter.tsx) | Owned Counter UI |
-| [SharedCounter.tsx](../src/components/SharedCounter.tsx) | Shared Counter UI |
 
 ## 環境変数
 

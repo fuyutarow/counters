@@ -216,22 +216,12 @@ export const feeSponsorRoutes = new Hono()
 
     const signature = sendResult.value;
 
-    // Step 6: Confirm transaction
-    const confirmStart = performance.now();
-    const confirmResult = await ResultAsync.fromPromise(
-      connection.confirmTransaction(signature, "confirmed"),
-      (e) => (e instanceof Error ? e : new Error("Failed to confirm transaction")),
-    );
-
-    if (confirmResult.isErr()) {
-      consola.error("[Fee-Sponsor] Failed to confirm transaction", {
-        error: confirmResult.error.message,
-      });
-      return c.json({ error: confirmResult.error.message, signature }, 500);
-    }
-    const confirmTime = performance.now() - confirmStart;
-    consola.info(`[Fee-Sponsor] 3. Confirm tx: ${confirmTime.toFixed(0)}ms`);
-
+    // Note: Backend does NOT call confirmTransaction here.
+    // Solana's confirmTransaction uses WebSocket subscriptions internally,
+    // which don't work reliably in Cloudflare Workers / miniflare environment.
+    // Instead, let the client handle confirmation (browser WebSocket works fine).
+    // This is different from Sui's executeTransactionBlock({ requestType: "WaitForLocalExecution" })
+    // which uses HTTP-based polling internally.
     const totalTime = performance.now() - totalStart;
 
     consola.box(
@@ -240,21 +230,19 @@ export const feeSponsorRoutes = new Hono()
 │  1. Deserialize:            ${deserializeTime.toFixed(0).padStart(5)}ms            │
 │  2. Sign (sponsor):         ${signTime.toFixed(0).padStart(5)}ms            │
 │  3. Send tx:                ${sendTime.toFixed(0).padStart(5)}ms            │
-│  4. Confirm tx:             ${confirmTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total backend time:        ${totalTime.toFixed(0).padStart(5)}ms            │
 └──────────────────────────────────────────────┘`,
     );
 
-    consola.success("[Fee-Sponsor] Sponsored transaction executed (1RT)", {
+    consola.success("[Fee-Sponsor] Sponsored transaction sent (1RT)", {
       signature,
-      success: !confirmResult.value.value?.err,
     });
 
     return c.json({
       signature,
-      success: !confirmResult.value.value?.err,
+      success: true,
     });
   })
   // GET /api/tx/sponsor/balance - Check sponsor balance
