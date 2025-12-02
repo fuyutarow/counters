@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(/bin/grep -E ^next@)",
-      "Bash(/bin/grep:*)"
+      "Bash(/bin/grep:*)",
+      "Bash(bun add:*)",
+      "Bash(bun run build:*)",
+      "Bash(sui client objects:*)",
+      "Bash(cat:*)",
+      "Bash(sui client publish:*)",
+      "Bash(sui client object:*)",
+      "Bash(rip:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

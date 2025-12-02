@@ -11,6 +11,7 @@
   "dependencies": {
     "@mysten/bcs": "^1.9.2",
     "@mysten/dapp-kit": "0.19.11",
+    "@mysten/enoki": "^0.12.14",
     "@mysten/seal": "^0.9.6",
     "@mysten/sui": "1.45.2",
     "@mysten/walrus": "^0.8.6",
@@ -31,6 +32,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "consola": "^3.4.2",
+    "hono": "^4.10.7",
     "lucide-react": "^0.555.0",
     "neverthrow": "^8.2.0",
     "next": "15",

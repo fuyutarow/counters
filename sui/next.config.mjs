@@ -8,6 +8,14 @@ const nextConfig = {
   transpilePackages: ["@mysten/dapp-kit"],
   // Next.js 15: Server Components bundlingから除外するパッケージ
   serverExternalPackages: ["pino-pretty", "lokijs", "encoding"],
+  // ウォレットアイコン用の外部画像ドメイン
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "cdn.martianwallet.xyz" },
+      { protocol: "https", hostname: "**.suiet.app" },
+      { protocol: "https", hostname: "**.slush.app" },
+    ],
+  },
   webpack: (config, { nextRuntime }) => {
 
     // Skip WASM handling for edge runtime

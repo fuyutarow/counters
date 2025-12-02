@@ -3,7 +3,7 @@
 
 [move]
 version = 3
-manifest_digest = "11AD0B205D27724E1113AA3AECA49FD1C680DBCBD99F9463BB326885B43D105B"
+manifest_digest = "2EEF00C17CD41ACC7B6E83D9C8883606001A7860E1B08722A11574BE70FCEC07"
 deps_digest = "397E6A9F7A624706DBDFEE056CE88391A15876868FD18A88504DA74EB458D697"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -107,3 +107,11 @@ source = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-c
 use_environment = "testnet"
 manifest_digest = "B8C664B06BC7B99ACEEB08688161E8ADF3C781673E3530340084FD196AEA7802"
 deps = { Sui = "Sui", WAL = "WAL" }
+
+[env]
+
+[env.testnet]
+chain-id = "4c78adac"
+original-published-id = "0x50cb3285306eea84ce5a721642f6099ce8890389b154d232df9159ed2594a45f"
+latest-published-id = "0x50cb3285306eea84ce5a721642f6099ce8890389b154d232df9159ed2594a45f"
+published-version = "1"

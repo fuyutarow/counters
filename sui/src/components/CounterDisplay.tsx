@@ -1,7 +1,7 @@
 "use client";
 
 import { formatAddress } from "@mysten/sui/utils";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Zap } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,8 +13,10 @@ interface CounterDisplayProps {
   value: string;
   isLoading: boolean;
   isIncrementing: boolean;
+  isSponsoredIncrementing?: boolean;
   isSettingValue: boolean;
   onIncrement: () => void;
+  onIncrementSponsored?: () => void;
   onSetValue: (value: number) => void;
   error?: Error | null;
 }
@@ -25,8 +27,10 @@ export function CounterDisplay({
   value,
   isLoading,
   isIncrementing,
+  isSponsoredIncrementing = false,
   isSettingValue,
   onIncrement,
+  onIncrementSponsored,
   onSetValue,
   error,
 }: CounterDisplayProps) {
@@ -108,12 +112,31 @@ export function CounterDisplay({
 
           <Button
             onClick={onIncrement}
-            disabled={isIncrementing || isLoading}
+            disabled={isIncrementing || isSponsoredIncrementing || isLoading}
             className="w-full"
             size="lg"
           >
             {isIncrementing ? "Incrementing..." : "Increment"}
           </Button>
+
+          {onIncrementSponsored && (
+            <Button
+              onClick={onIncrementSponsored}
+              disabled={isIncrementing || isSponsoredIncrementing || isLoading}
+              variant="outline"
+              className="w-full border-yellow-500 text-yellow-600 hover:bg-yellow-50"
+              size="lg"
+            >
+              {isSponsoredIncrementing ? (
+                "Incrementing..."
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Increment with Enoki (Gas-free)
+                </>
+              )}
+            </Button>
+          )}
 
           <div className="space-y-2">
             <Input
