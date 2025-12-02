@@ -1,22 +1,40 @@
+# Environment
+*.env*
+!.env.example
+!.env.production
 
+# TypeScript
 tsconfig.tsbuildinfo
 next-env.d.ts
 
+# IDE / Tools
 .serena/
 
+# Next.js
 .next/
 .next-dev/
 
+# OpenNext & Cloudflare Workers
+.open-next/
+.wrangler/
+.dev.vars
+
+# Dependencies
 node_modules/
 dist/
 **/build/
 
+# Lockfiles (use bun.lock)
+package-lock.json
+pnpm-lock.yaml
 yarn.lock
-bun.lock
-bun.lockb
 
 # @mysten/codegen generated summaries
 **/package_summaries/
+
+# Move
+move/**/.coverage_map.mvcov
+move/**/.trace
 
 # WASM build artifacts
 wasm/*/target/

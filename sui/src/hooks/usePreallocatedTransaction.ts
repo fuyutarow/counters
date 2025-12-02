@@ -43,7 +43,8 @@ export function usePreallocatedTransaction(
   const account = useCurrentAccount();
   const { currentWallet } = useCurrentWallet();
 
-  const { allocation, hasAllocation, allocate, isAllocating, refreshCoin } = useCoinAllocation();
+  const { allocation, hasAllocation, allocate, isAllocating, refreshCoin, clearAllocation } =
+    useCoinAllocation();
 
   const showNotifications = options?.showNotifications !== false;
 
@@ -139,6 +140,13 @@ export function usePreallocatedTransaction(
 
       if (!executeResponse.ok) {
         const errorData = await executeResponse.json().catch(() => undefined);
+
+        // Check if allocation is missing (server restart/HMR cleared the Map)
+        if (executeResponse.status === 404) {
+          consola.warn("[Prealloc] Allocation not found on server, need to re-allocate");
+          clearAllocation(); // Clear client cache so UI shows "Need Allocation"
+          throw new Error("Allocation expired. Please allocate again.");
+        }
 
         // Check if it's a version mismatch error - need to refresh coin
         if (errorData?.error?.includes("version") || errorData?.needsRefresh) {

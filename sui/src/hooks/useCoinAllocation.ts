@@ -119,12 +119,22 @@ export function useCoinAllocation() {
     const response = await fetch(`${apiUrl}/coin/${account.address}?network=testnet`);
 
     if (!response.ok) {
+      // If 404, clear the cache so UI reflects no allocation
+      if (response.status === 404) {
+        queryClient.setQueryData([ALLOCATION_QUERY_KEY, account?.address], null);
+        consola.warn("[CoinAllocation] Allocation not found on server, cache cleared");
+      }
       return null;
     }
 
     const data = await response.json();
     queryClient.setQueryData([ALLOCATION_QUERY_KEY, account?.address], data);
     return data;
+  };
+
+  // Clear allocation from cache (used when server loses allocation)
+  const clearAllocation = () => {
+    queryClient.setQueryData([ALLOCATION_QUERY_KEY, account?.address], null);
   };
 
   return {
@@ -136,5 +146,6 @@ export function useCoinAllocation() {
     allocateAsync: allocateMutation.mutateAsync,
     isAllocating: allocateMutation.isPending,
     refreshCoin,
+    clearAllocation,
   };
 }

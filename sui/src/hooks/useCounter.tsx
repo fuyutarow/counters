@@ -144,9 +144,13 @@ export function useCounter() {
   const incrementOwnedCounter = useMutation({
     mutationKey: ["counter", "owned", "increment"],
     mutationFn: async (counterId: string): Promise<void> => {
+      if (!account?.address) {
+        throw new Error("No account connected");
+      }
+
       const totalStart = performance.now();
 
-      // Step 1: Build transaction
+      // Step 1: Build transaction commands (no RPC)
       const buildStart = performance.now();
       const tx = new Transaction();
       ownedCounter.increment({
@@ -155,7 +159,15 @@ export function useCounter() {
       })(tx);
       const buildTime = performance.now() - buildStart;
 
+      // Step 1.5: DryRun (explicit RPC call for comparison)
+      // Need to set sender for build() to work
+      tx.setSender(account.address);
+      const dryRunStart = performance.now();
+      await tx.build({ client: suiClient });
+      const dryRunTime = performance.now() - dryRunStart;
+
       // Step 2: Sign & Execute (includes user approval wait)
+      // Note: Wallet will re-build internally, so this measures wallet overhead + user time
       const executeStart = performance.now();
       const result = await executeTransaction({ transaction: tx });
       const executeTime = performance.now() - executeStart;
@@ -169,14 +181,15 @@ export function useCounter() {
       const invalidateTime = performance.now() - invalidateStart;
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + invalidateTime; // Sign&Executeはユーザー操作含むので除外
+      const systemTime = buildTime + dryRunTime + invalidateTime; // Sign&Executeはユーザー操作含むので除外
 
       consola.box(
         `┌─ Normal Transaction ─────────────────────────┐
 │                                              │
-│  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
-│  2. Sign+Execute:       ${executeTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  3. Invalidate:         ${invalidateTime.toFixed(0).padStart(5)}ms            │
+│  1. Build (commands):   ${buildTime.toFixed(0).padStart(5)}ms            │
+│  2. DryRun (RPC):       ${dryRunTime.toFixed(0).padStart(5)}ms            │
+│  3. Sign+Execute:       ${executeTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
+│  4. Invalidate:         ${invalidateTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
