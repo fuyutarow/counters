@@ -94,6 +94,7 @@ export function useCounter() {
   const { currentWallet } = useCurrentWallet();
   const { mutateAsync: executeTransaction } = useSignAndExecuteTransaction({
     execute: async ({ bytes, signature }) => {
+      // POST to RPC (no WaitForLocalExecution - we wait separately)
       const executionResult = await suiClient.executeTransactionBlock({
         transactionBlock: bytes,
         signature,
@@ -101,9 +102,9 @@ export function useCounter() {
           showRawEffects: true,
           showObjectChanges: true,
         },
-        requestType: "WaitForLocalExecution",
       });
 
+      // Finalize: wait for transaction confirmation
       return suiClient.waitForTransaction({
         digest: executionResult.digest,
         options: {
@@ -188,8 +189,8 @@ export function useCounter() {
       }
       const signTime = performance.now() - signStart;
 
-      // Step 3: Execute transaction (RPC call)
-      const executeStart = performance.now();
+      // Step 3: POST to RPC (submit transaction, no wait)
+      const postStart = performance.now();
       const executionResult = await suiClient.executeTransactionBlock({
         transactionBlock: txBytes,
         signature: signResponse.signature,
@@ -197,12 +198,12 @@ export function useCounter() {
           showRawEffects: true,
           showObjectChanges: true,
         },
-        requestType: "WaitForLocalExecution",
+        // Note: Do NOT use WaitForLocalExecution - measure POST and Finalize separately
       });
-      const executeTime = performance.now() - executeStart;
+      const postTime = performance.now() - postStart;
 
-      // Step 4: Wait for confirmation
-      const waitStart = performance.now();
+      // Step 4: Finalize (wait for transaction confirmation)
+      const finalizeStart = performance.now();
       const result = await suiClient.waitForTransaction({
         digest: executionResult.digest,
         options: {
@@ -210,7 +211,7 @@ export function useCounter() {
           showObjectChanges: true,
         },
       });
-      const waitTime = performance.now() - waitStart;
+      const finalizeTime = performance.now() - finalizeStart;
 
       // Invalidate queries (not included in System time - app-specific)
       await Promise.all([
@@ -219,15 +220,15 @@ export function useCounter() {
       ]);
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + executeTime + waitTime;
+      const systemTime = buildTime + postTime + finalizeTime;
 
       consola.box(
         `┌─ Normal Transaction ─────────────────────────┐
 │                                              │
 │  1. Build (resolve+gas): ${buildTime.toFixed(0).padStart(5)}ms            │
 │  2. Sign:                ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  3. Execute:             ${executeTime.toFixed(0).padStart(5)}ms            │
-│  4. Wait for tx:         ${waitTime.toFixed(0).padStart(5)}ms            │
+│  3. POST to RPC:         ${postTime.toFixed(0).padStart(5)}ms            │
+│  4. Finalize:            ${finalizeTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total (wall clock):     ${totalTime.toFixed(0).padStart(5)}ms            │
@@ -335,8 +336,8 @@ export function useCounter() {
       }
       const signTime = performance.now() - signStart;
 
-      // Step 3: Execute transaction (RPC call)
-      const executeStart = performance.now();
+      // Step 3: POST to RPC (submit transaction, no wait)
+      const postStart = performance.now();
       const executionResult = await suiClient.executeTransactionBlock({
         transactionBlock: txBytes,
         signature: signResponse.signature,
@@ -344,12 +345,12 @@ export function useCounter() {
           showRawEffects: true,
           showObjectChanges: true,
         },
-        requestType: "WaitForLocalExecution",
+        // Note: Do NOT use WaitForLocalExecution - measure POST and Finalize separately
       });
-      const executeTime = performance.now() - executeStart;
+      const postTime = performance.now() - postStart;
 
-      // Step 4: Wait for confirmation
-      const waitStart = performance.now();
+      // Step 4: Finalize (wait for transaction confirmation)
+      const finalizeStart = performance.now();
       const result = await suiClient.waitForTransaction({
         digest: executionResult.digest,
         options: {
@@ -357,7 +358,7 @@ export function useCounter() {
           showObjectChanges: true,
         },
       });
-      const waitTime = performance.now() - waitStart;
+      const finalizeTime = performance.now() - finalizeStart;
 
       // Invalidate queries (not included in System time - app-specific)
       await Promise.all([
@@ -366,15 +367,15 @@ export function useCounter() {
       ]);
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + executeTime + waitTime;
+      const systemTime = buildTime + postTime + finalizeTime;
 
       consola.box(
         `┌─ Normal Transaction (Shared) ────────────────┐
 │                                              │
 │  1. Build (resolve+gas): ${buildTime.toFixed(0).padStart(5)}ms            │
 │  2. Sign:                ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  3. Execute:             ${executeTime.toFixed(0).padStart(5)}ms            │
-│  4. Wait for tx:         ${waitTime.toFixed(0).padStart(5)}ms            │
+│  3. POST to RPC:         ${postTime.toFixed(0).padStart(5)}ms            │
+│  4. Finalize:            ${finalizeTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total (wall clock):     ${totalTime.toFixed(0).padStart(5)}ms            │

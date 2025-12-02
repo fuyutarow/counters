@@ -121,11 +121,12 @@ export function useSponsoredTransaction(
       }
 
       const executionResult = (await executeResponse.json()) as { digest: string };
-      const executeTime = performance.now() - executeStart;
-      consola.info(`[Enoki] 4. Execute sponsored tx (API PUT): ${executeTime.toFixed(0)}ms`);
+      // Note: Enoki PUT includes POST + Finalize internally (we can't separate them)
+      const enokiPostTime = performance.now() - executeStart;
+      consola.info(`[Enoki] 4. PUT to Enoki (POST+Finalize): ${enokiPostTime.toFixed(0)}ms`);
 
-      // Step 5: Wait for transaction
-      const waitStart = performance.now();
+      // Step 5: Finalize (additional wait on client, usually fast since Enoki already waited)
+      const finalizeStart = performance.now();
       const result = await client.waitForTransaction({
         digest: executionResult.digest,
         options: {
@@ -134,15 +135,15 @@ export function useSponsoredTransaction(
           showEvents: true,
         },
       });
-      const waitTime = performance.now() - waitStart;
-      consola.info(`[Enoki] 5. Wait for transaction: ${waitTime.toFixed(0)}ms`);
+      const finalizeTime = performance.now() - finalizeStart;
+      consola.info(`[Enoki] 5. Finalize (client): ${finalizeTime.toFixed(0)}ms`);
 
       if (result.effects?.status?.status !== "success") {
         throw new Error(`Transaction failed: ${result.effects?.status?.error || "Unknown error"}`);
       }
 
       const totalTime = performance.now() - totalStart;
-      const systemTime = buildTime + sponsorTime + executeTime + waitTime;
+      const systemTime = buildTime + sponsorTime + enokiPostTime + finalizeTime;
 
       consola.box(
         `┌─ Enoki Sponsored Transaction ────────────────┐
@@ -150,13 +151,14 @@ export function useSponsoredTransaction(
 │  1. Build:              ${buildTime.toFixed(0).padStart(5)}ms            │
 │  2. Sponsor (POST):     ${sponsorTime.toFixed(0).padStart(5)}ms            │
 │  3. Sign:               ${signTime.toFixed(0).padStart(5)}ms  ⏱️ user  │
-│  4. Execute (PUT):      ${executeTime.toFixed(0).padStart(5)}ms            │
-│  5. Wait for tx:        ${waitTime.toFixed(0).padStart(5)}ms            │
+│  4. PUT (POST+Finalize):${enokiPostTime.toFixed(0).padStart(5)}ms  ※Enoki内部 │
+│  5. Finalize (client):  ${finalizeTime.toFixed(0).padStart(5)}ms            │
 │                                              │
 ├──────────────────────────────────────────────┤
 │  Total (wall clock):    ${totalTime.toFixed(0).padStart(5)}ms            │
 │  System time only:      ${systemTime.toFixed(0).padStart(5)}ms            │
 │  (excludes user approval wait)               │
+│  ※ Enoki PUT = POST + Finalize 一体化        │
 └──────────────────────────────────────────────┘`,
       );
 

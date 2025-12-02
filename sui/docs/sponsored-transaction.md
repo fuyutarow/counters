@@ -43,71 +43,79 @@ API往復: 0回           API往復: 1回                API往復: 2回
 
 ```text
 ┌─ Normal Transaction ─────────────────────────┐
-│  1. Build (resolve+gas):   611ms             │
-│  2. Sign:                 3693ms  ⏱️ user    │
-│  3. Execute:              2901ms             │
-│  4. Wait for tx:           130ms             │
+│                                              │
+│  1. Build (resolve+gas):      531ms          │
+│  2. Sign:                    3596ms  ⏱️ user │
+│  3. POST to RPC:              570ms          │
+│  4. Finalize:                 209ms          │
+│                                              │
 ├──────────────────────────────────────────────┤
-│  System time only:        3642ms             │
+│  System time only:           1310ms          │
 └──────────────────────────────────────────────┘
 
 ┌─ Pre-allocated 1RT Transaction ──────────────┐
-│  1. Build (with coin):      387ms            │
-│  2. Sign:                  3711ms  ⏱️ user   │
-│  3. Execute (1RT):         2989ms            │
-│  4. Wait for tx:            219ms            │
+│                                              │
+│  1. Build (with coin):        340ms          │
+│  2. Sign:                    3738ms  ⏱️ user │
+│  3. POST to API (1RT):        939ms          │
+│  4. Finalize:                1270ms          │
+│                                              │
 ├──────────────────────────────────────────────┤
-│  System time only:         3594ms            │
+│  System time only:           2549ms          │
 └──────────────────────────────────────────────┘
 
 ┌─ Enoki Sponsored Transaction ────────────────┐
-│  1. Build:                 232ms             │
-│  2. Sponsor (POST):        581ms             │
-│  3. Sign:                 3359ms  ⏱️ user    │
-│  4. Execute (PUT):        3169ms             │
-│  5. Wait for tx:           216ms             │
+│                                              │
+│  1. Build:                    253ms          │
+│  2. Sponsor (POST):           765ms          │
+│  3. Sign:                    3658ms  ⏱️ user │
+│  4. PUT (POST+Finalize):     3276ms  ※Enoki  │
+│  5. Finalize (client):        239ms          │
+│                                              │
 ├──────────────────────────────────────────────┤
-│  System time only:        4197ms             │
+│  System time only:           4533ms          │
+│  ※ Enoki PUT = POST + Finalize 一体化        │
 └──────────────────────────────────────────────┘
 ```
 
 ⏱️ = ユーザー操作待ち時間（System time から除外）
 
+**用語の定義**:
+
+- **POST to RPC / POST to API**: トランザクションを RPC ノードまたは Backend API に送信する処理
+- **Finalize**: トランザクション確定を待つ処理（クライアント側で `waitForTransaction` を呼び出し）
+
+**1RT の POST vs Finalize について**:
+1RT Pre-allocated では「Server submits, Client waits」設計により、サーバーは POST のみ（~600-1,300ms）で即座に応答し、Finalize（~200-2,300ms）はクライアント側で実行される。トータルの System time は同等だが、責務が明確に分離されている。
+
 ### 時間収支 (MECE)
 
 | 処理 | 必須? | Normal | 1RT | Enoki |
 |------|-------|--------|-----|-------|
-| **Build (オブジェクト解決)** | ✅ 必須 | - | 387ms | 232ms |
-| **Build (ガス見積もり)** | スキップ可 | 611ms (含む) | - | - |
-| **Sponsor API** | 方式依存 | - | - | 581ms |
+| **Build (オブジェクト解決)** | ✅ 必須 | 531ms (含む) | 340ms | 253ms |
+| **Sponsor API** | 方式依存 | - | - | 765ms |
 | **ユーザー署名** | ✅ 必須 | ⏱️ | ⏱️ | ⏱️ |
-| **トランザクション実行** | ✅ 必須 | 2,901ms | 2,989ms | 3,169ms |
-| **確定待ち** | ✅ 必須 | 130ms ※ | 219ms | 216ms |
-| **System time 合計** | | **~3,640ms** | **~3,600ms** | **~4,200ms** |
+| **POST (送信)** | ✅ 必須 | 570ms | 939ms | 3,276ms (※) |
+| **Finalize (確定待ち)** | ✅ 必須 | 209ms | 1,270ms | 239ms |
+| **System time 合計** | | **~1,310ms** | **~2,549ms** | **~4,533ms** |
 
-※ Normal の確定待ちが短いのは署名数の違い（1 vs 2）による署名検証オーバーヘッドの差。
+※ Enoki PUT は POST + Finalize が内部で一体化されている
 
-**結論**: トランザクション実行時間は3方式でほぼ同等 (~2,900-3,200ms)。RPC ノードへの送信と Sui Network の確定処理は共通インフラのため差が出ない。
+**結論**: Normal が最も高速（~1,300ms）。1RT は ~2,500ms、Enoki は ~4,500ms。差は主に Sponsor API のオーバーヘッドと Enoki 内部での確定待ち。
 
 ### Owned vs Shared Counter
 
-Shared Counter でも同様の計測を実施した結果：
-
-| 方式 | Owned Execute | Shared Execute | 差分 |
-|------|---------------|----------------|------|
-| Normal | 2,901ms | 2,800-3,100ms | 誤差範囲 |
-| 1RT | 2,989ms | 2,900-3,000ms | 誤差範囲 |
-| Enoki | 3,169ms | 1,100-3,400ms | 高バラつき |
+オブジェクト種別（owned/shared）による性能差はない。RPC ノード遅延が支配的要因。
 
 **知見**:
 
-- **オブジェクト種別（owned/shared）による性能差はない** - RPC ノード遅延が支配的要因
-- Enoki の Execute 時間には高いバラつきがある（1,102ms〜3,440ms）- Enoki サーバー側の負荷状況に依存
+- Enoki の PUT 時間には高いバラつきがある（~3,200-3,350ms） - Enoki サーバー側の負荷状況に依存
+- 1RT の Backend 処理（Sign + Execute）は ~530-950ms と安定（自前サーバーのため）
+- POST と Finalize の時間配分は RPC ノードの状態により変動する
 
 **凡例**:
 
 - ✅ 必須: 全方式で避けられない処理
-- スキップ可: `setGasBudget()` で固定値指定により回避可能
 - 方式依存: 特定の方式でのみ発生
 - ⏱️: ユーザー操作待ち（System time から除外）
 
@@ -116,10 +124,10 @@ Shared Counter でも同様の計測を実施した結果：
 | 処理 | 最適化方法 |
 |------|-----------|
 | オブジェクト参照解決 | 不可（Sui の UTXO モデル上必須） |
-| ガス見積もり | `setGasBudget()` で固定値指定 → スキップ (~300ms 削減) |
-| Sponsor API | 1RT 方式で Enoki 経由を回避 (~600ms 削減) |
-| トランザクション実行 | RPC ノードの遅延に依存（制御不可） |
-| 確定待ち | RPC ノードの遅延に依存（制御不可） |
+| ガス見積もり | `setGasBudget()` で固定値指定 → スキップ可能 |
+| Sponsor API | 1RT 方式で Enoki 経由を回避（~700ms 削減） |
+| POST (送信) | RPC ノードの遅延に依存（制御不可） |
+| Finalize (確定待ち) | RPC ノードの遅延に依存（制御不可） |
 
 ## フロー詳細
 
@@ -216,6 +224,10 @@ ENOKI_SECRET_KEY=enoki_private_xxx
 # 1RT Pre-allocated 用
 SPONSOR_PRIVATE_KEY=suiprivkey1xxx
 ```
+
+## 設計原則
+
+「Server submits, Client waits」の設計原則については [Cloudflare Workers 考慮事項](../../docs/cloudflare-workers-considerations.md) を参照。
 
 ## 参考
 
