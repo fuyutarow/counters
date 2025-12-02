@@ -16,7 +16,8 @@
       "Bash(sui client balance:*)",
       "Bash(sui client faucet:*)",
       "Bash(bun run check:*)",
-      "Bash(sui client:*)"
+      "Bash(sui client:*)",
+      "Bash(mise run:*)"
     ],
     "deny": [],
     "ask": []

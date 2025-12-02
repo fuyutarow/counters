@@ -595,3 +595,51 @@ echo "  shared_counter..."
 cargo fmt --manifest-path programs/shared_counter/Cargo.toml
 echo "✅ Rustフォーマット完了"
 '''
+
+# ===============================================
+# 🚢 Cloudflare Workers / OpenNext デプロイタスク
+# ===============================================
+
+[tasks."cf:login"]
+description = "Cloudflare Wrangler でログイン"
+alias = "cfl"
+run = "bunx wrangler login"
+
+[tasks."cf:whoami"]
+description = "現在のCloudflareアカウント確認"
+alias = "cfw"
+run = "bunx wrangler whoami"
+
+[tasks."workers:build"]
+description = "OpenNext Cloudflare ビルド (.open-next 生成)"
+alias = "wb"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🏗️ Next.js ビルド中..."
+bun run build
+echo ""
+echo "🏗️ OpenNext Cloudflare アダプター実行中..."
+bunx opennextjs-cloudflare build --skipBuild
+echo "✅ OpenNext ビルド完了: .open-next/"
+'''
+
+[tasks."workers:dev"]
+description = "Cloudflare Workers 環境でローカルプレビュー（ビルド込み）"
+alias = "wd"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🔍 Workers 環境でプレビュー起動中..."
+bunx wrangler dev
+'''
+
+[tasks."workers:preview"]
+description = "Cloudflare Workers 環境でリモートプレビュー（本番に近い環境）"
+alias = "wp"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "🔍 Workers 環境でリモートプレビュー起動中..."
+bunx wrangler dev --remote
+'''

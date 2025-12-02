@@ -10,6 +10,11 @@ dist/
 **/build/
 out/
 
+# OpenNext & Cloudflare Workers
+.open-next/
+.wrangler/
+.dev.vars
+
 # Foundry artifacts
 cache/
 out/

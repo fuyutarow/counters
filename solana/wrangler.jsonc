@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "solana-counters",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  // Static assets binding (required for Next.js)
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+  // Observability
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

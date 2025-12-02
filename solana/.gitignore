@@ -11,6 +11,11 @@ dist/
 out/
 **/build/
 
+# OpenNext & Cloudflare Workers
+.open-next/
+.wrangler/
+.dev.vars
+
 # TypeScript build info
 tsconfig.tsbuildinfo
 *.tsbuildinfo

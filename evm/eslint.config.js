@@ -131,6 +131,8 @@ export default [
       "node_modules/**",
       ".next/**",
       ".next-dev/**",
+      ".open-next/**",
+      ".wrangler/**",
       "out/**",
       "dist/**",
       "build/**",
