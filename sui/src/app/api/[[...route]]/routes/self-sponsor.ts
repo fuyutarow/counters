@@ -19,10 +19,40 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import consola from "consola";
 import { Hono } from "hono";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 
 import { serverEnv } from "@/env/server";
-import { type NetworkName } from "@/networkConstants";
+import { counterNetworkDefinitions, type NetworkName } from "@/networkConstants";
+
+/**
+ * Validate that transaction only calls allowed packages
+ * Returns Result with undefined on success, error message on failure
+ */
+function validateTransactionPackages(
+  txBytes: Uint8Array,
+  allowedPackageIds: string[],
+): Result<undefined, string> {
+  const txResult = Result.fromThrowable(
+    () => Transaction.from(txBytes),
+    (e) => `Failed to parse transaction: ${e instanceof Error ? e.message : "Unknown error"}`,
+  )();
+
+  if (txResult.isErr()) {
+    return err(txResult.error);
+  }
+
+  const commands = txResult.value.getData().commands;
+
+  for (const command of commands) {
+    if (command.$kind === "MoveCall") {
+      const pkg = command.MoveCall.package;
+      if (!allowedPackageIds.includes(pkg)) {
+        return err(`Unauthorized package: ${pkg}. Allowed: ${allowedPackageIds.join(", ")}`);
+      }
+    }
+  }
+  return ok(undefined);
+}
 
 // In-memory store for allocated coins per user (production: use Redis or DB)
 // Only stores address → coinId mapping. Version/digest must be fetched fresh.
@@ -342,6 +372,23 @@ export const selfSponsorRoutes = new Hono()
 
     const { txBytes, userSignature, userAddress, network } = parseResult.value;
 
+    // Validate transaction only calls allowed packages
+    const networkConfig = counterNetworkDefinitions[network];
+    const allowedPackageIds = [
+      networkConfig.variables.counterPackageId,
+      networkConfig.variables.suiPackageId, // Allow standard Sui operations (e.g., transfer)
+    ].filter(Boolean); // Remove empty strings
+
+    const txBytesBuffer = Buffer.from(txBytes, "base64");
+    const validationResult = validateTransactionPackages(txBytesBuffer, allowedPackageIds);
+    if (validationResult.isErr()) {
+      consola.warn("[Self-Sponsor] Transaction validation failed", {
+        userAddress,
+        error: validationResult.error,
+      });
+      return c.json({ error: validationResult.error }, 403);
+    }
+
     // Verify user has an allocated coin
     const allocation = allocatedCoins.get(userAddress);
     if (!allocation || allocation.network !== network) {
@@ -358,9 +405,6 @@ export const selfSponsorRoutes = new Hono()
     const suiClient = getSuiClient(network);
 
     const totalStart = performance.now();
-
-    // Decode transaction bytes
-    const txBytesBuffer = Buffer.from(txBytes, "base64");
 
     consola.info("[Self-Sponsor] Execute pre-allocated transaction", {
       userAddress,
