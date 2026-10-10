@@ -1,6 +1,6 @@
 [tools]
 node = "24.8.0"
-bun = "1.2.22"
+bun = "1.4"
 
 [vars]
 default_network = "testnet"
