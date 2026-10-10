@@ -1,3 +1,0 @@
-[test]
-# Timeout in milliseconds for each test
-timeout = 60000
